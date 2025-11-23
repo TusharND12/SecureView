@@ -108,7 +108,19 @@ public class FaceDetector {
     
     private String loadCascadeFile() throws Exception {
         // Try to find cascade file in common locations
+        String opencvDir = System.getenv("OPENCV_DIR");
+        if (opencvDir == null || opencvDir.isEmpty()) {
+            opencvDir = "C:\\Users\\TUSHAR\\Downloads\\opencv";
+        }
+        
         String[] possiblePaths = {
+            // OpenCV installation directory (most common)
+            opencvDir + File.separator + "build" + File.separator + "etc" + File.separator + "haarcascades" + File.separator + CASCADE_FILE,
+            opencvDir + File.separator + "data" + File.separator + "haarcascades" + File.separator + CASCADE_FILE,
+            // Alternative OpenCV paths
+            "C:\\opencv\\build\\etc\\haarcascades\\" + CASCADE_FILE,
+            "C:\\opencv\\data\\haarcascades\\" + CASCADE_FILE,
+            // Current directory and resources
             System.getProperty("user.dir") + File.separator + CASCADE_FILE,
             System.getProperty("opencv.data.dir", "") + File.separator + CASCADE_FILE,
             "resources" + File.separator + CASCADE_FILE
@@ -134,7 +146,8 @@ public class FaceDetector {
             logger.warn("Could not load cascade from resources", e);
         }
         
-        throw new Exception("Could not find face cascade classifier file. Please ensure OpenCV is properly installed.");
+        throw new Exception("Could not find face cascade classifier file. Please ensure OpenCV is properly installed.\n" +
+            "Expected location: " + opencvDir + File.separator + "build" + File.separator + "etc" + File.separator + "haarcascades" + File.separator + CASCADE_FILE);
     }
 }
 

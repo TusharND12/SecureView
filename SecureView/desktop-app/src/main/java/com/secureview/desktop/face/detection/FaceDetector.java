@@ -1,0 +1,140 @@
+package com.secureview.desktop.face.detection;
+
+import com.secureview.desktop.opencv.stub.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.File;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+
+/**
+ * Handles face detection using OpenCV's Haar Cascade classifier.
+ */
+public class FaceDetector {
+    private static final Logger logger = LoggerFactory.getLogger(FaceDetector.class);
+    
+    private CascadeClassifier faceCascade;
+    private static final String CASCADE_FILE = "haarcascade_frontalface_alt.xml";
+    
+    public void initialize() throws Exception {
+        logger.info("Initializing Face Detector...");
+        
+        // Load cascade classifier
+        faceCascade = new CascadeClassifier();
+        
+        // Try to load from resources or use default OpenCV path
+        String cascadePath = loadCascadeFile();
+        if (!faceCascade.load(cascadePath)) {
+            throw new Exception("Failed to load face cascade classifier");
+        }
+        
+        logger.info("Face Detector initialized successfully");
+    }
+    
+    /**
+     * Detects face in the given image.
+     * @param image Input image
+     * @return Cropped face region, or null if no face detected
+     */
+    public Mat detectFace(Mat image) {
+        if (image.empty()) {
+            logger.warn("Empty image provided for face detection");
+            return null;
+        }
+        
+        Mat gray = new Mat();
+        Imgproc.cvtColor(image, gray, Imgproc.COLOR_BGR2GRAY);
+        Imgproc.equalizeHist(gray, gray);
+        
+        MatOfRect faces = new MatOfRect();
+        faceCascade.detectMultiScale(
+            gray,
+            faces,
+            1.1,
+            3,
+            0,
+            new Size(30, 30),
+            new Size()
+        );
+        
+        Rect[] facesArray = faces.toArray();
+        if (facesArray.length == 0) {
+            logger.debug("No face detected in image");
+            return null;
+        }
+        
+        // Use the largest face detected
+        Rect largestFace = facesArray[0];
+        for (Rect face : facesArray) {
+            if (face.area() > largestFace.area()) {
+                largestFace = face;
+            }
+        }
+        
+        // Extract face region with padding
+        int padding = 20;
+        int x = Math.max(0, largestFace.x - padding);
+        int y = Math.max(0, largestFace.y - padding);
+        int width = Math.min(image.cols() - x, largestFace.width + 2 * padding);
+        int height = Math.min(image.rows() - y, largestFace.height + 2 * padding);
+        
+        Rect faceRect = new Rect(x, y, width, height);
+        Mat faceRegion = new Mat(image, faceRect);
+        Mat faceCopy = new Mat();
+        faceRegion.copyTo(faceCopy);
+        
+        gray.release();
+        faces.release();
+        
+        logger.debug("Face detected at ({}, {}) with size {}x{}", 
+            largestFace.x, largestFace.y, largestFace.width, largestFace.height);
+        
+        return faceCopy;
+    }
+    
+    /**
+     * Checks if a face is detected in the image.
+     */
+    public boolean hasFace(Mat image) {
+        Mat face = detectFace(image);
+        if (face != null) {
+            face.release();
+            return true;
+        }
+        return false;
+    }
+    
+    private String loadCascadeFile() throws Exception {
+        // Try to find cascade file in common locations
+        String[] possiblePaths = {
+            System.getProperty("user.dir") + File.separator + CASCADE_FILE,
+            System.getProperty("opencv.data.dir", "") + File.separator + CASCADE_FILE,
+            "resources" + File.separator + CASCADE_FILE
+        };
+        
+        for (String path : possiblePaths) {
+            File file = new File(path);
+            if (file.exists()) {
+                logger.info("Found cascade file at: {}", path);
+                return path;
+            }
+        }
+        
+        // Try to extract from resources
+        try (InputStream is = getClass().getResourceAsStream("/" + CASCADE_FILE)) {
+            if (is != null) {
+                File tempFile = File.createTempFile("haarcascade_", ".xml");
+                Files.copy(is, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                logger.info("Extracted cascade file to: {}", tempFile.getAbsolutePath());
+                return tempFile.getAbsolutePath();
+            }
+        } catch (Exception e) {
+            logger.warn("Could not load cascade from resources", e);
+        }
+        
+        throw new Exception("Could not find face cascade classifier file. Please ensure OpenCV is properly installed.");
+    }
+}
+

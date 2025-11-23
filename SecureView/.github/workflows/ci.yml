@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up JDK 11
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    
+    - name: Build Desktop Application
+      run: |
+        cd desktop-app
+        mvn clean package -DskipTests
+    
+    - name: Build Android Application
+      run: |
+        cd android-app
+        chmod +x gradlew
+        ./gradlew build
+

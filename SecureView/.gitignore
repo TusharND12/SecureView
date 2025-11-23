@@ -1,0 +1,63 @@
+# Maven
+desktop-app/target/
+desktop-app/.classpath
+desktop-app/.project
+desktop-app/.settings/
+desktop-app/.idea/
+
+# Android
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/.idea/
+android-app/local.properties
+android-app/*.iml
+android-app/app/*.iml
+android-app/.DS_Store
+
+# Configuration and data
+**/.secureview/
+**/config.json
+**/encryption.key
+**/face_embedding.enc
+**/intrusion_*.jpg
+**/attempts.log
+
+# Firebase
+**/google-services.json
+**/service-account-*.json
+**/firebase-credentials.json
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.class
+*.jar
+*.war
+*.ear
+
+# Package files
+*.apk
+*.aab
+

@@ -3,6 +3,8 @@ package com.secureview.desktop;
 import com.secureview.desktop.config.ConfigManager;
 import com.secureview.desktop.face.FaceRecognitionService;
 import com.secureview.desktop.firebase.FirebaseService;
+import com.secureview.desktop.lock.LockManager;
+import com.secureview.desktop.logging.AttemptLogger;
 import com.secureview.desktop.opencv.stub.Mat;
 import com.secureview.desktop.opencv.stub.VideoCapture;
 import com.secureview.desktop.opencv.stub.Videoio;
@@ -60,9 +62,11 @@ public class RegistrationWindow extends JFrame {
         
         // Status panel
         JPanel statusPanel = new JPanel(new BorderLayout());
-        statusLabel = new JLabel("Position your face in front of the camera and click 'Capture'", 
+        statusLabel = new JLabel("<html><center><b>Step 1:</b> Position your face in front of the camera<br>" +
+            "<b>Step 2:</b> Click 'Capture Face' when ready<br>" +
+            "<b>Step 3:</b> Click 'Finish Registration' to complete</center></html>", 
             JLabel.CENTER);
-        statusLabel.setFont(new Font("Arial", Font.PLAIN, 14));
+        statusLabel.setFont(new Font("Arial", Font.PLAIN, 13));
         
         // Button panel
         JPanel buttonPanel = new JPanel(new FlowLayout());
@@ -85,26 +89,73 @@ public class RegistrationWindow extends JFrame {
     
     private void startCamera() {
         try {
+            logger.info("Initializing camera...");
+            statusLabel.setText("Initializing camera...");
+            
             camera = new VideoCapture(0);
+            
+            // Wait a bit for camera to initialize
+            Thread.sleep(500);
+            
             if (!camera.isOpened()) {
-                throw new Exception("Failed to open camera");
+                throw new Exception("Failed to open camera. Please check:\n" +
+                    "1. Camera is connected\n" +
+                    "2. No other application is using the camera\n" +
+                    "3. Camera permissions are granted");
             }
             
+            logger.info("Camera opened successfully, setting properties...");
+            
+            // Set camera resolution
             camera.set(Videoio.CAP_PROP_FRAME_WIDTH, 640);
             camera.set(Videoio.CAP_PROP_FRAME_HEIGHT, 480);
             
+            // Give camera time to adjust
+            Thread.sleep(200);
+            
+            // Test if we can read a frame
+            Mat testFrame = new Mat();
+            int retries = 5;
+            boolean frameRead = false;
+            for (int i = 0; i < retries; i++) {
+                if (camera.read(testFrame) && !testFrame.empty()) {
+                    frameRead = true;
+                    logger.info("Camera test frame read successfully");
+                    break;
+                }
+                Thread.sleep(100);
+            }
+            testFrame.release();
+            
+            if (!frameRead) {
+                throw new Exception("Camera opened but cannot read frames. Please check camera settings.");
+            }
+            
+            // Start capture timer
             captureTimer = new Timer(33, e -> updateCameraFeed());
             captureTimer.start();
             
-            logger.info("Camera started for registration");
+            logger.info("Camera started successfully for registration");
+            SwingUtilities.invokeLater(() -> {
+                statusLabel.setText("<html><center><b>Step 1:</b> Position your face in front of the camera<br>" +
+                    "<b>Step 2:</b> Click 'Capture Face' when ready<br>" +
+                    "<b>Step 3:</b> Click 'Finish Registration' to complete</center></html>");
+            });
             
         } catch (Exception e) {
             logger.error("Failed to start camera", e);
-            statusLabel.setText("Error: Failed to start camera");
-            JOptionPane.showMessageDialog(this,
-                "Failed to start camera: " + e.getMessage(),
-                "Camera Error",
-                JOptionPane.ERROR_MESSAGE);
+            SwingUtilities.invokeLater(() -> {
+                statusLabel.setText("Error: Failed to start camera");
+                JOptionPane.showMessageDialog(this,
+                    "Failed to start camera: " + e.getMessage() + "\n\n" +
+                    "Troubleshooting:\n" +
+                    "1. Ensure camera is connected and working\n" +
+                    "2. Close other applications using the camera\n" +
+                    "3. Check camera permissions in Windows settings\n" +
+                    "4. Try restarting the application",
+                    "Camera Error",
+                    JOptionPane.ERROR_MESSAGE);
+            });
         }
     }
     
@@ -114,18 +165,43 @@ public class RegistrationWindow extends JFrame {
         }
         
         Mat frame = new Mat();
-        if (!camera.read(frame) || frame.empty()) {
+        try {
+            if (!camera.read(frame)) {
+                frame.release();
+                return;
+            }
+            
+            if (frame.empty() || frame.cols() == 0 || frame.rows() == 0) {
+                frame.release();
+                return;
+            }
+        } catch (Exception e) {
+            logger.debug("Error reading camera frame: {}", e.getMessage());
             frame.release();
             return;
         }
         
         // Check for face
-        Mat face = faceRecognitionService.detectFace(frame);
-        if (face != null && !face.empty()) {
-            statusLabel.setText("Face detected! Click 'Capture Face' to register.");
-            face.release();
-        } else {
-            statusLabel.setText("No face detected. Please position your face in front of the camera.");
+        try {
+            Mat face = faceRecognitionService.detectFace(frame);
+            if (face != null) {
+                // Check if face is empty - use real OpenCV method if available
+                boolean isEmpty = face.empty();
+                if (!isEmpty) {
+                    statusLabel.setText("Face detected! Click 'Capture Face' to register.");
+                    face.release();
+                } else {
+                    statusLabel.setText("No face detected. Please position your face in front of the camera.");
+                    if (face != null) {
+                        face.release();
+                    }
+                }
+            } else {
+                statusLabel.setText("No face detected. Please position your face in front of the camera.");
+            }
+        } catch (Exception e) {
+            logger.debug("Face detection error: {}", e.getMessage());
+            statusLabel.setText("Position your face in front of the camera.");
         }
         
         // Display frame
@@ -150,15 +226,45 @@ public class RegistrationWindow extends JFrame {
         
         isProcessing.set(true);
         captureButton.setEnabled(false);
-        statusLabel.setText("Capturing face...");
+        SwingUtilities.invokeLater(() -> {
+            statusLabel.setText("Capturing face... Please wait...");
+        });
         
         new Thread(() -> {
             try {
+                // Try multiple times to capture a frame
                 Mat frame = new Mat();
-                if (!camera.read(frame) || frame.empty()) {
-                    statusLabel.setText("Failed to capture frame");
-                    isProcessing.set(false);
-                    captureButton.setEnabled(true);
+                boolean frameCaptured = false;
+                int maxRetries = 10;
+                
+                for (int i = 0; i < maxRetries; i++) {
+                    if (camera.read(frame)) {
+                        if (!frame.empty() && frame.cols() > 0 && frame.rows() > 0) {
+                            frameCaptured = true;
+                            logger.info("Frame captured successfully (attempt {})", i + 1);
+                            break;
+                        }
+                    }
+                    Thread.sleep(50); // Wait 50ms between retries
+                }
+                
+                if (!frameCaptured) {
+                    logger.error("Failed to capture frame after {} attempts", maxRetries);
+                    SwingUtilities.invokeLater(() -> {
+                        statusLabel.setText("Failed to capture frame. Please try again.");
+                        JOptionPane.showMessageDialog(RegistrationWindow.this,
+                            "Failed to capture frame from camera.\n\n" +
+                            "Possible causes:\n" +
+                            "1. Camera is being used by another application\n" +
+                            "2. Camera permissions not granted\n" +
+                            "3. Camera hardware issue\n\n" +
+                            "Please check your camera and try again.",
+                            "Capture Error",
+                            JOptionPane.WARNING_MESSAGE);
+                        isProcessing.set(false);
+                        captureButton.setEnabled(true);
+                    });
+                    frame.release();
                     return;
                 }
                 
@@ -174,12 +280,30 @@ public class RegistrationWindow extends JFrame {
                     return;
                 }
                 
-                // Store captured face
+                // Store captured face - create a proper copy
                 if (capturedFace != null) {
                     capturedFace.release();
                 }
+                
+                // Create new Mat and copy face data
                 capturedFace = new Mat();
-                face.copyTo(capturedFace);
+                try {
+                    // Use real OpenCV copyTo if available
+                    Object realFace = face.getRealInstance();
+                    Object realCaptured = capturedFace.getRealInstance();
+                    if (realFace != null && realCaptured != null) {
+                        // Use reflection to call copyTo on real Mat
+                        java.lang.reflect.Method copyToMethod = realFace.getClass().getMethod("copyTo", 
+                            Class.forName("org.opencv.core.Mat"));
+                        copyToMethod.invoke(realFace, realCaptured);
+                    } else {
+                        // Fallback to stub copyTo
+                        face.copyTo(capturedFace);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error copying face Mat, using stub method", e);
+                    face.copyTo(capturedFace);
+                }
                 face.release();
                 
                 SwingUtilities.invokeLater(() -> {
@@ -210,37 +334,49 @@ public class RegistrationWindow extends JFrame {
         }
         
         finishButton.setEnabled(false);
-        statusLabel.setText("Registering user...");
+        captureButton.setEnabled(false);
+        statusLabel.setText("Registering user... Please wait...");
         
         new Thread(() -> {
             try {
+                logger.info("Starting registration process...");
                 boolean success = faceRecognitionService.registerUser(capturedFace);
                 
-                if (success) {
-                    SwingUtilities.invokeLater(() -> {
+                SwingUtilities.invokeLater(() -> {
+                    if (success) {
                         JOptionPane.showMessageDialog(this,
                             "User registered successfully!\n\n" +
-                            "You can now use SecureView for authentication.",
+                            "You will now be taken to the authentication screen.",
                             "Registration Complete",
                             JOptionPane.INFORMATION_MESSAGE);
                         dispose();
-                        System.exit(0);
-                    });
-                } else {
-                    SwingUtilities.invokeLater(() -> {
-                        statusLabel.setText("Registration failed. Please try again.");
+                        // Transition to authentication window
+                        startAuthenticationWindow();
+                    } else {
+                        statusLabel.setText("Registration failed. Please try capturing again.");
                         finishButton.setEnabled(true);
-                    });
-                }
+                        captureButton.setEnabled(true);
+                        JOptionPane.showMessageDialog(this,
+                            "Registration failed. Possible reasons:\n" +
+                            "- Face embedding extraction failed\n" +
+                            "- Liveness detection failed\n" +
+                            "- Please try capturing your face again with better lighting.",
+                            "Registration Error",
+                            JOptionPane.WARNING_MESSAGE);
+                    }
+                });
                 
             } catch (Exception e) {
                 logger.error("Error during registration", e);
                 SwingUtilities.invokeLater(() -> {
+                    statusLabel.setText("Registration error: " + e.getMessage());
+                    finishButton.setEnabled(true);
+                    captureButton.setEnabled(true);
                     JOptionPane.showMessageDialog(this,
-                        "Registration failed: " + e.getMessage(),
+                        "Registration failed: " + e.getMessage() + "\n\n" +
+                        "Please try again or check the logs for details.",
                         "Registration Error",
                         JOptionPane.ERROR_MESSAGE);
-                    finishButton.setEnabled(true);
                 });
             }
         }).start();
@@ -261,6 +397,31 @@ public class RegistrationWindow extends JFrame {
         System.arraycopy(buffer, 0, targetPixels, 0, buffer.length);
         
         return image;
+    }
+    
+    private void startAuthenticationWindow() {
+        logger.info("Starting authentication window after successful registration");
+        try {
+            LockManager lockManager = LockManager.getInstance();
+            AttemptLogger attemptLogger = AttemptLogger.getInstance();
+            
+            AuthenticationWindow authWindow = new AuthenticationWindow(
+                faceRecognitionService,
+                firebaseService,
+                lockManager,
+                attemptLogger,
+                configManager
+            );
+            authWindow.setVisible(true);
+        } catch (Exception e) {
+            logger.error("Failed to start authentication window", e);
+            JOptionPane.showMessageDialog(null,
+                "Registration successful, but failed to start authentication window.\n" +
+                "Please restart the application.",
+                "Warning",
+                JOptionPane.WARNING_MESSAGE);
+            System.exit(0);
+        }
     }
     
     @Override

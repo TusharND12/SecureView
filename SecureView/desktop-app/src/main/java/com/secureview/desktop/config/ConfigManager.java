@@ -68,7 +68,7 @@ public class ConfigManager {
     
     private void createDefaultConfig() {
         config = new ApplicationConfig();
-        config.setFaceRecognitionThreshold(0.6);
+        config.setFaceRecognitionThreshold(0.5); // Lowered from 0.6 to 0.5 for better matching
         config.setLivenessDetectionEnabled(true);
         config.setMaxFailedAttempts(3);
         config.setLockoutDuration(300000); // 5 minutes
@@ -82,6 +82,10 @@ public class ConfigManager {
     private void ensureDirectoriesExist() throws IOException {
         Files.createDirectories(Paths.get(config.getDataDirectory()));
         Files.createDirectories(Paths.get(config.getLogsDirectory()));
+        // Create registered_faces directory
+        String registeredFacesDir = config.getDataDirectory() + File.separator + "registered_faces";
+        Files.createDirectories(Paths.get(registeredFacesDir));
+        logger.info("Created registered_faces directory at: {}", registeredFacesDir);
     }
     
     public ApplicationConfig getConfig() {

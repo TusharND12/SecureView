@@ -42,40 +42,63 @@ public class VideoCapture {
     }
     
     public boolean read(Mat frame) {
-        if (realVideoCapture != null && readMethod != null) {
+        if (realVideoCapture == null) {
+            org.slf4j.LoggerFactory.getLogger(VideoCapture.class)
+                .warn("VideoCapture: realVideoCapture is null. OpenCV may not be loaded.");
+            return false;
+        }
+        
+        if (readMethod == null) {
+            org.slf4j.LoggerFactory.getLogger(VideoCapture.class)
+                .warn("VideoCapture: readMethod is null.");
+            return false;
+        }
+        
+        try {
+            // Create or get real Mat instance
+            Object realMat;
+            Class<?> matClass = Class.forName("org.opencv.core.Mat");
+            
+            // Try to get real Mat from stub, or create new one
             try {
-                // Create or get real Mat instance
-                Object realMat;
-                Class<?> matClass = Class.forName("org.opencv.core.Mat");
-                
-                // Try to get real Mat from stub, or create new one
+                java.lang.reflect.Field realField = Mat.class.getDeclaredField("realMat");
+                realField.setAccessible(true);
+                realMat = realField.get(frame);
+                if (realMat == null) {
+                    realMat = matClass.getDeclaredConstructor().newInstance();
+                    realField.set(frame, realMat);
+                }
+            } catch (Exception e) {
+                // Create new real Mat
+                realMat = matClass.getDeclaredConstructor().newInstance();
+                // Store it in the stub
                 try {
                     java.lang.reflect.Field realField = Mat.class.getDeclaredField("realMat");
                     realField.setAccessible(true);
-                    realMat = realField.get(frame);
-                    if (realMat == null) {
-                        realMat = matClass.getDeclaredConstructor().newInstance();
-                        realField.set(frame, realMat);
-                    }
-                } catch (Exception e) {
-                    // Create new real Mat
-                    realMat = matClass.getDeclaredConstructor().newInstance();
-                    // Store it in the stub
-                    try {
-                        java.lang.reflect.Field realField = Mat.class.getDeclaredField("realMat");
-                        realField.setAccessible(true);
-                        realField.set(frame, realMat);
-                    } catch (Exception e2) {
-                        // Ignore if field doesn't exist
-                    }
+                    realField.set(frame, realMat);
+                } catch (Exception e2) {
+                    // Ignore if field doesn't exist
                 }
-                
-                return (Boolean) readMethod.invoke(realVideoCapture, realMat);
-            } catch (Exception e) {
-                return false;
             }
+            
+            // Invoke read method
+            Boolean result = (Boolean) readMethod.invoke(realVideoCapture, realMat);
+            
+            // Update the stub's realMat field after read
+            try {
+                java.lang.reflect.Field realField = Mat.class.getDeclaredField("realMat");
+                realField.setAccessible(true);
+                realField.set(frame, realMat);
+            } catch (Exception e) {
+                // Ignore
+            }
+            
+            return result != null && result;
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(VideoCapture.class)
+                .error("Error in VideoCapture.read()", e);
+            return false;
         }
-        return false;
     }
     
     public void set(int prop, double value) {

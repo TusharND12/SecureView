@@ -52,6 +52,23 @@ public class Mat {
         }
     }
     
+    /**
+     * Constructor to wrap a real OpenCV Mat instance.
+     * Used when loading images or getting Mat from real OpenCV operations.
+     */
+    public Mat(Object realMatInstance) {
+        if (realMatInstance != null && realMatInstance.getClass().getName().equals("org.opencv.core.Mat")) {
+            this.realMat = realMatInstance;
+            try {
+                this.realClass = realMatInstance.getClass();
+            } catch (Exception e) {
+                this.realMat = null;
+            }
+        } else {
+            this.realMat = null;
+        }
+    }
+    
     public boolean empty() {
         if (realMat != null) {
             try {

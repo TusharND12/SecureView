@@ -40,6 +40,9 @@ public class MatOfRect {
         if (realMatOfRect != null && toArrayMethod != null) {
             try {
                 Object[] rectArray = (Object[]) toArrayMethod.invoke(realMatOfRect);
+                if (rectArray == null) {
+                    return new Rect[0];
+                }
                 Rect[] result = new Rect[rectArray.length];
                 for (int i = 0; i < rectArray.length; i++) {
                     Object rect = rectArray[i];
@@ -52,6 +55,8 @@ public class MatOfRect {
                 }
                 return result;
             } catch (Exception e) {
+                org.slf4j.LoggerFactory.getLogger(MatOfRect.class)
+                    .error("Error converting MatOfRect to array", e);
                 return new Rect[0];
             }
         }

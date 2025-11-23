@@ -21,16 +21,18 @@ public class FaceDetector {
     public void initialize() throws Exception {
         logger.info("Initializing Face Detector...");
         
-        // Load cascade classifier
+        // Load cascade classifier (stub will use real OpenCV if available)
         faceCascade = new CascadeClassifier();
         
         // Try to load from resources or use default OpenCV path
         String cascadePath = loadCascadeFile();
+        
         if (!faceCascade.load(cascadePath)) {
-            throw new Exception("Failed to load face cascade classifier");
+            throw new Exception("Failed to load face cascade classifier from: " + cascadePath + 
+                "\nPlease verify the file exists and OpenCV is properly installed.");
         }
         
-        logger.info("Face Detector initialized successfully");
+        logger.info("Face Detector initialized successfully with cascade: {}", cascadePath);
     }
     
     /**
@@ -39,16 +41,21 @@ public class FaceDetector {
      * @return Cropped face region, or null if no face detected
      */
     public Mat detectFace(Mat image) {
-        if (image.empty()) {
-            logger.warn("Empty image provided for face detection");
+        if (image == null || image.empty()) {
+            logger.warn("Empty or null image provided for face detection");
             return null;
         }
+        
+        logger.debug("Starting face detection on image: {}x{}", image.cols(), image.rows());
         
         Mat gray = new Mat();
         Imgproc.cvtColor(image, gray, Imgproc.COLOR_BGR2GRAY);
         Imgproc.equalizeHist(gray, gray);
         
+        logger.debug("Converted to grayscale and equalized histogram");
+        
         MatOfRect faces = new MatOfRect();
+        logger.debug("Calling detectMultiScale...");
         faceCascade.detectMultiScale(
             gray,
             faces,
@@ -59,9 +66,14 @@ public class FaceDetector {
             new Size()
         );
         
+        logger.debug("detectMultiScale completed, extracting faces array...");
         Rect[] facesArray = faces.toArray();
+        logger.info("Face detection found {} faces", facesArray.length);
+        
         if (facesArray.length == 0) {
             logger.debug("No face detected in image");
+            gray.release();
+            faces.release();
             return null;
         }
         

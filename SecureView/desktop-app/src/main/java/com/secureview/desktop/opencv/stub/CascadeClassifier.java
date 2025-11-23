@@ -1,5 +1,7 @@
 package com.secureview.desktop.opencv.stub;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.lang.reflect.Method;
 
@@ -8,6 +10,7 @@ import java.lang.reflect.Method;
  * Uses reflection to call real OpenCV methods if available.
  */
 public class CascadeClassifier {
+    private static final Logger logger = LoggerFactory.getLogger(CascadeClassifier.class);
     private Object realCascadeClassifier;
     private Class<?> realClass;
     private Method loadMethod;
@@ -25,40 +28,62 @@ public class CascadeClassifier {
                 double.class, int.class, int.class,
                 Class.forName("org.opencv.core.Size"),
                 Class.forName("org.opencv.core.Size"));
+            logger.debug("Successfully created real OpenCV CascadeClassifier");
+        } catch (ClassNotFoundException e) {
+            logger.warn("OpenCV CascadeClassifier class not found. OpenCV may not be loaded yet.");
+            realCascadeClassifier = null;
         } catch (Exception e) {
-            // Real OpenCV not available, will use stub behavior
+            logger.error("Error creating real OpenCV CascadeClassifier", e);
             realCascadeClassifier = null;
         }
     }
     
     public boolean load(String filename) {
-        if (realCascadeClassifier != null && loadMethod != null) {
-            try {
-                // Verify file exists
-                File file = new File(filename);
-                if (!file.exists()) {
-                    return false;
-                }
-                return (Boolean) loadMethod.invoke(realCascadeClassifier, filename);
-            } catch (Exception e) {
+        if (realCascadeClassifier == null) {
+            logger.error("Cannot load cascade: realCascadeClassifier is null. OpenCV may not be loaded.");
+            return false;
+        }
+        if (loadMethod == null) {
+            logger.error("Cannot load cascade: loadMethod is null.");
+            return false;
+        }
+        try {
+            // Verify file exists
+            File file = new File(filename);
+            if (!file.exists()) {
+                logger.error("Cascade file does not exist: {}", filename);
                 return false;
             }
+            boolean result = (Boolean) loadMethod.invoke(realCascadeClassifier, filename);
+            logger.info("Cascade load result: {} for file: {}", result, filename);
+            return result;
+        } catch (Exception e) {
+            logger.error("Error loading cascade file: {}", filename, e);
+            return false;
         }
-        return false;
     }
     
     public void detectMultiScale(Mat image, Object faces, double scaleFactor, 
                                 int minNeighbors, int flags, Object minSize, Object maxSize) {
         if (realCascadeClassifier != null && detectMultiScaleMethod != null) {
             try {
-                // If faces is a MatOfRect stub, get the real instance
-                Object realFaces = faces;
+                // Get real Mat instance from image
+                Object realImage = image.getRealInstance();
+                if (realImage == null) {
+                    logger.error("Cannot detect faces: realImage is null. Mat stub may not have real OpenCV Mat instance.");
+                    return; // Can't proceed without real Mat
+                }
+                logger.debug("Got real Mat instance for face detection");
+                
+                // Get or create real MatOfRect
+                Object realFaces;
                 if (faces instanceof MatOfRect) {
-                    Object realInstance = ((MatOfRect) faces).getRealInstance();
+                    MatOfRect matOfRect = (MatOfRect) faces;
+                    Object realInstance = matOfRect.getRealInstance();
                     if (realInstance != null) {
                         realFaces = realInstance;
                     } else {
-                        // Create real MatOfRect
+                        // Create real MatOfRect and store in stub
                         Class<?> matOfRectClass = Class.forName("org.opencv.core.MatOfRect");
                         realFaces = matOfRectClass.getDeclaredConstructor().newInstance();
                         // Update the stub to wrap it
@@ -70,11 +95,40 @@ public class CascadeClassifier {
                             // Ignore
                         }
                     }
+                } else {
+                    realFaces = faces; // Assume it's already a real instance
                 }
                 
-                detectMultiScaleMethod.invoke(realCascadeClassifier, image, realFaces, 
-                    scaleFactor, minNeighbors, flags, minSize, maxSize);
+                // Convert Size objects to real OpenCV Size
+                Object realMinSize;
+                Object realMaxSize;
+                Class<?> sizeClass = Class.forName("org.opencv.core.Size");
+                
+                if (minSize instanceof Size) {
+                    Size s = (Size) minSize;
+                    realMinSize = sizeClass.getDeclaredConstructor(double.class, double.class)
+                        .newInstance(s.width, s.height);
+                } else {
+                    realMinSize = minSize; // Assume it's already real
+                }
+                
+                if (maxSize instanceof Size) {
+                    Size s = (Size) maxSize;
+                    realMaxSize = sizeClass.getDeclaredConstructor(double.class, double.class)
+                        .newInstance(s.width, s.height);
+                } else {
+                    realMaxSize = maxSize; // Assume it's already real
+                }
+                
+                // Call real OpenCV detectMultiScale
+                logger.debug("Invoking real OpenCV detectMultiScale with image size: {}x{}", 
+                    realImage.getClass().getMethod("cols").invoke(realImage),
+                    realImage.getClass().getMethod("rows").invoke(realImage));
+                detectMultiScaleMethod.invoke(realCascadeClassifier, realImage, realFaces, 
+                    scaleFactor, minNeighbors, flags, realMinSize, realMaxSize);
+                logger.debug("detectMultiScale completed successfully");
             } catch (Exception e) {
+                logger.error("Error in detectMultiScale", e);
                 // Fall through to stub behavior
             }
         }

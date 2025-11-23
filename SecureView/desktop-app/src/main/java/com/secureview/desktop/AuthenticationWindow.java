@@ -43,6 +43,11 @@ public class AuthenticationWindow extends JFrame {
     private AtomicBoolean isProcessing = new AtomicBoolean(false);
     private AtomicInteger failedAttempts = new AtomicInteger(0);
     private long lastLockoutTime = 0;
+    private long lastAuthenticationAttempt = 0;
+    private static final long AUTHENTICATION_COOLDOWN = 2000; // 2 seconds between attempts
+    private static final long SUCCESS_DELAY = 500; // 500ms before closing on success
+    private int frameSkipCounter = 0;
+    private static final int FRAME_SKIP = 2; // Process every 3rd frame for display
     
     public AuthenticationWindow(
             FaceRecognitionService faceRecognitionService,
@@ -83,8 +88,51 @@ public class AuthenticationWindow extends JFrame {
         progressBar.setStringPainted(true);
         progressBar.setString("Ready");
         
+        // Add re-register button
+        JButton reRegisterButton = new JButton("Re-register Face");
+        reRegisterButton.setToolTipText("Clear existing registration and register a new face");
+        reRegisterButton.addActionListener(e -> {
+            int confirm = JOptionPane.showConfirmDialog(
+                this,
+                "This will clear your current registration.\n" +
+                "You will need to register your face again.\n\n" +
+                "Do you want to continue?",
+                "Re-register Face",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+            );
+            
+            if (confirm == JOptionPane.YES_OPTION) {
+                try {
+                    faceRecognitionService.clearRegistration();
+                    JOptionPane.showMessageDialog(
+                        this,
+                        "Registration cleared.\n" +
+                        "Closing authentication window.\n" +
+                        "Please restart the application to register again.",
+                        "Registration Cleared",
+                        JOptionPane.INFORMATION_MESSAGE
+                    );
+                    dispose();
+                    System.exit(0);
+                } catch (Exception ex) {
+                    logger.error("Error clearing registration", ex);
+                    JOptionPane.showMessageDialog(
+                        this,
+                        "Failed to clear registration: " + ex.getMessage(),
+                        "Error",
+                        JOptionPane.ERROR_MESSAGE
+                    );
+                }
+            }
+        });
+        
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.add(reRegisterButton);
+        
         statusPanel.add(statusLabel, BorderLayout.CENTER);
         statusPanel.add(progressBar, BorderLayout.SOUTH);
+        statusPanel.add(buttonPanel, BorderLayout.NORTH);
         
         add(cameraLabel, BorderLayout.CENTER);
         add(statusPanel, BorderLayout.SOUTH);
@@ -115,8 +163,8 @@ public class AuthenticationWindow extends JFrame {
             camera.set(Videoio.CAP_PROP_FRAME_WIDTH, 640);
             camera.set(Videoio.CAP_PROP_FRAME_HEIGHT, 480);
             
-            // Start capture timer
-            captureTimer = new Timer(100, e -> captureAndProcess());
+            // Start capture timer - reduced frequency for better performance
+            captureTimer = new Timer(200, e -> captureAndProcess()); // 5 FPS for processing
             captureTimer.start();
             
             logger.info("Camera started successfully");
@@ -142,8 +190,10 @@ public class AuthenticationWindow extends JFrame {
             configManager.getConfig().getLockoutDuration()) {
             long remainingSeconds = (configManager.getConfig().getLockoutDuration() - 
                 (currentTime - lastLockoutTime)) / 1000;
-            statusLabel.setText("System locked. Please wait " + remainingSeconds + " seconds.");
-            progressBar.setString("Locked");
+            SwingUtilities.invokeLater(() -> {
+                statusLabel.setText("System locked. Please wait " + remainingSeconds + " seconds.");
+                progressBar.setString("Locked");
+            });
             return;
         }
         
@@ -154,17 +204,34 @@ public class AuthenticationWindow extends JFrame {
             failedAttempts.set(0);
         }
         
+        // Check authentication cooldown
+        if ((currentTime - lastAuthenticationAttempt) < AUTHENTICATION_COOLDOWN) {
+            // Still in cooldown, just display frame without processing
+            Mat frame = new Mat();
+            if (camera.read(frame) && !frame.empty()) {
+                displayFrame(frame);
+                frame.release();
+            }
+            return;
+        }
+        
         Mat frame = new Mat();
         if (!camera.read(frame) || frame.empty()) {
             frame.release();
             return;
         }
         
-        // Display frame
+        // Display frame (every frame for smooth video)
         displayFrame(frame);
         
-        // Process authentication
-        SwingUtilities.invokeLater(() -> processAuthentication(frame));
+        // Process authentication (with frame skipping for performance)
+        frameSkipCounter++;
+        if (frameSkipCounter >= FRAME_SKIP) {
+            frameSkipCounter = 0;
+            processAuthentication(frame);
+        } else {
+            frame.release(); // Release frame if not processing
+        }
     }
     
     private void displayFrame(Mat frame) {
@@ -184,7 +251,11 @@ public class AuthenticationWindow extends JFrame {
         }
         
         isProcessing.set(true);
-        progressBar.setString("Processing...");
+        lastAuthenticationAttempt = System.currentTimeMillis();
+        
+        SwingUtilities.invokeLater(() -> {
+            progressBar.setString("Processing...");
+        });
         
         new Thread(() -> {
             try {
@@ -192,14 +263,18 @@ public class AuthenticationWindow extends JFrame {
                 Mat face = faceRecognitionService.detectFace(frame);
                 
                 if (face == null || face.empty()) {
-                    statusLabel.setText("No face detected. Please position your face in front of the camera.");
-                    progressBar.setString("No face detected");
+                    SwingUtilities.invokeLater(() -> {
+                        statusLabel.setText("No face detected. Please position your face in front of the camera.");
+                        progressBar.setString("No face detected");
+                    });
                     isProcessing.set(false);
                     frame.release();
                     return;
                 }
                 
-                statusLabel.setText("Face detected. Authenticating...");
+                SwingUtilities.invokeLater(() -> {
+                    statusLabel.setText("Face detected. Authenticating...");
+                });
                 
                 // Authenticate
                 double similarity = faceRecognitionService.authenticateUser(face);
@@ -218,8 +293,10 @@ public class AuthenticationWindow extends JFrame {
                 
             } catch (Exception e) {
                 logger.error("Error during authentication", e);
-                statusLabel.setText("Error: " + e.getMessage());
-                progressBar.setString("Error");
+                SwingUtilities.invokeLater(() -> {
+                    statusLabel.setText("Error: " + e.getMessage());
+                    progressBar.setString("Error");
+                });
             } finally {
                 isProcessing.set(false);
             }
@@ -235,8 +312,8 @@ public class AuthenticationWindow extends JFrame {
             attemptLogger.logSuccess("user");
             failedAttempts.set(0);
             
-            // Close window after short delay
-            Timer closeTimer = new Timer(1000, e -> {
+            // Close window after short delay (reduced from 1000ms to 500ms)
+            Timer closeTimer = new Timer((int)SUCCESS_DELAY, e -> {
                 dispose();
                 System.exit(0);
             });

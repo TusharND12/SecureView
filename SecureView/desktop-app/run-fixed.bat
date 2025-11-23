@@ -40,11 +40,11 @@ if not defined OPENCV_JAR (
 
 REM Add OpenCV DLL directory to PATH for this session
 if defined OPENCV_DLL_DIR (
-    call set "PATH=!OPENCV_DLL_DIR!;%%PATH%%"
+    set "PATH=!OPENCV_DLL_DIR!;!PATH!"
     echo Added OpenCV DLL directory to PATH
 )
 
-REM Set OPENCV_DIR environment variable for Java
+REM Set OPENCV_DIR environment variable
 if defined OPENCV_DIR (
     set "OPENCV_DIR=!OPENCV_DIR!"
 )

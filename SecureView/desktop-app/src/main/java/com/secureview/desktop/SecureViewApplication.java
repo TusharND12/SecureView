@@ -28,6 +28,18 @@ public class SecureViewApplication {
     private AuthenticationWindow authWindow;
     
     public static void main(String[] args) {
+        // Check for command-line arguments
+        boolean forceRegistration = false;
+        if (args.length > 0) {
+            for (String arg : args) {
+                if (arg.equals("--register") || arg.equals("-r") || arg.equals("--reset")) {
+                    forceRegistration = true;
+                    logger.info("Force registration mode enabled via command-line argument");
+                    break;
+                }
+            }
+        }
+        
         // Load OpenCV native library (optional - will show warning if not available)
         if (!OpenCVLoader.loadLibrary()) {
             logger.warn("OpenCV not available. Face recognition features will be limited.");
@@ -43,13 +55,19 @@ public class SecureViewApplication {
                 JOptionPane.WARNING_MESSAGE);
         }
         
+        final boolean finalForceRegistration = forceRegistration;
+        
         // Start application
         SwingUtilities.invokeLater(() -> {
-            new SecureViewApplication().start();
+            new SecureViewApplication().start(finalForceRegistration);
         });
     }
     
     public void start() {
+        start(false);
+    }
+    
+    public void start(boolean forceRegistration) {
         logger.info("Starting SecureView Application...");
         
         try {
@@ -60,10 +78,23 @@ public class SecureViewApplication {
             // Initialize services
             initializeServices();
             
-            // Check if user is registered
+            // If force registration is requested, clear existing registration
+            if (forceRegistration) {
+                logger.info("Force registration requested. Clearing existing registration...");
+                faceRecognitionService.clearRegistration();
+                JOptionPane.showMessageDialog(null,
+                    "Existing registration has been cleared.\n" +
+                    "You will now be taken to the registration window.",
+                    "Registration Reset",
+                    JOptionPane.INFORMATION_MESSAGE);
+            }
+            
+            // Check if user is registered - REGISTRATION MUST HAPPEN FIRST
             if (!faceRecognitionService.isUserRegistered()) {
+                logger.info("No registered user found. User must register face first.");
                 showRegistrationWindow();
             } else {
+                logger.info("Registered user found. Starting authentication (will compare with registered face).");
                 startAuthentication();
             }
             

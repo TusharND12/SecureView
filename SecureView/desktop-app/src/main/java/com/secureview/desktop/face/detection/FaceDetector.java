@@ -27,9 +27,26 @@ public class FaceDetector {
         // Try to load from resources or use default OpenCV path
         String cascadePath = loadCascadeFile();
         
-        if (!faceCascade.load(cascadePath)) {
+        // Normalize path for OpenCV (use forward slashes or absolute path)
+        String normalizedPath = new File(cascadePath).getAbsolutePath().replace("\\", "/");
+        
+        logger.info("Attempting to load cascade from: {}", normalizedPath);
+        boolean loaded = faceCascade.load(normalizedPath);
+        
+        if (!loaded) {
+            // Try with backslashes (Windows)
+            normalizedPath = new File(cascadePath).getAbsolutePath();
+            logger.info("Retrying with Windows path format: {}", normalizedPath);
+            loaded = faceCascade.load(normalizedPath);
+        }
+        
+        if (!loaded) {
             throw new Exception("Failed to load face cascade classifier from: " + cascadePath + 
-                "\nPlease verify the file exists and OpenCV is properly installed.");
+                "\nFile exists: " + new File(cascadePath).exists() +
+                "\nPlease verify:\n" +
+                "1. The file exists and is readable\n" +
+                "2. OpenCV native library is loaded\n" +
+                "3. OpenCV is properly installed");
         }
         
         logger.info("Face Detector initialized successfully with cascade: {}", cascadePath);
@@ -122,14 +139,28 @@ public class FaceDetector {
         // Try to find cascade file in common locations
         String opencvDir = System.getenv("OPENCV_DIR");
         if (opencvDir == null || opencvDir.isEmpty()) {
-            opencvDir = "C:\\Users\\TUSHAR\\Downloads\\opencv";
+            // Try common OpenCV installation paths
+            String[] commonPaths = {
+                "C:\\Users\\TUSHAR\\Downloads\\opencv",
+                "C:\\opencv",
+                "C:\\opencv4120",
+                System.getProperty("user.home") + "\\Downloads\\opencv"
+            };
+            for (String path : commonPaths) {
+                File testDir = new File(path);
+                if (testDir.exists() && testDir.isDirectory()) {
+                    opencvDir = path;
+                    break;
+                }
+            }
         }
         
         String[] possiblePaths = {
             // OpenCV installation directory (most common)
-            opencvDir + File.separator + "build" + File.separator + "etc" + File.separator + "haarcascades" + File.separator + CASCADE_FILE,
-            opencvDir + File.separator + "data" + File.separator + "haarcascades" + File.separator + CASCADE_FILE,
+            opencvDir != null ? opencvDir + File.separator + "build" + File.separator + "etc" + File.separator + "haarcascades" + File.separator + CASCADE_FILE : null,
+            opencvDir != null ? opencvDir + File.separator + "data" + File.separator + "haarcascades" + File.separator + CASCADE_FILE : null,
             // Alternative OpenCV paths
+            "C:\\Users\\TUSHAR\\Downloads\\opencv\\build\\etc\\haarcascades\\" + CASCADE_FILE,
             "C:\\opencv\\build\\etc\\haarcascades\\" + CASCADE_FILE,
             "C:\\opencv\\data\\haarcascades\\" + CASCADE_FILE,
             // Current directory and resources
@@ -139,10 +170,13 @@ public class FaceDetector {
         };
         
         for (String path : possiblePaths) {
+            if (path == null) continue;
             File file = new File(path);
-            if (file.exists()) {
-                logger.info("Found cascade file at: {}", path);
-                return path;
+            if (file.exists() && file.isFile()) {
+                // Normalize path - use absolute path and replace backslashes
+                String normalizedPath = file.getAbsolutePath();
+                logger.info("Found cascade file at: {}", normalizedPath);
+                return normalizedPath;
             }
         }
         

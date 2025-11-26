@@ -1,6 +1,9 @@
 package com.secureview.desktop.opencv.stub;
 
 import com.secureview.desktop.opencv.stub.Mat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.lang.reflect.Method;
 
 /**
@@ -8,9 +11,16 @@ import java.lang.reflect.Method;
  * Uses reflection to call real OpenCV methods if available.
  */
 public class Imgproc {
+    private static final Logger logger = LoggerFactory.getLogger(Imgproc.class);
+    
     public static final int COLOR_BGR2GRAY = 6;
+    public static final int COLOR_GRAY2BGR = 8;
+    public static final int COLOR_BGRA2BGR = 6;
     public static final int CV_8UC1 = 0;
     public static final int CV_64F = 6;
+    public static final int TM_CCOEFF_NORMED = 5;
+    public static final int HISTCMP_CORREL = 0;
+    public static final int NORM_MINMAX = 32;
     
     private static Class<?> realClass;
     private static Method cvtColorMethod;
@@ -18,6 +28,8 @@ public class Imgproc {
     private static Method resizeMethod;
     private static Method sobelMethod;
     private static Method calcHistMethod;
+    private static Method matchTemplateMethod;
+    private static Method compareHistMethod;
     
     static {
         try {
@@ -44,6 +56,15 @@ public class Imgproc {
                 Class.forName("org.opencv.core.Mat"),
                 Class.forName("org.opencv.core.MatOfInt"),
                 Class.forName("org.opencv.core.MatOfFloat"));
+            matchTemplateMethod = realClass.getMethod("matchTemplate",
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"),
+                int.class);
+            compareHistMethod = realClass.getMethod("compareHist",
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"),
+                int.class);
         } catch (Exception e) {
             // Real OpenCV not available
         }
@@ -118,5 +139,31 @@ public class Imgproc {
             }
         }
     }
+    
+    public static void matchTemplate(Mat image, Mat templ, Mat result, int method) {
+        if (matchTemplateMethod != null && image.getRealInstance() != null && 
+            templ.getRealInstance() != null && result.getRealInstance() != null) {
+            try {
+                matchTemplateMethod.invoke(null, image.getRealInstance(), 
+                    templ.getRealInstance(), result.getRealInstance(), method);
+            } catch (Exception e) {
+                logger.debug("Template matching failed", e);
+            }
+        }
+    }
+    
+    public static double compareHist(Mat hist1, Mat hist2, int method) {
+        if (compareHistMethod != null && hist1.getRealInstance() != null && hist2.getRealInstance() != null) {
+            try {
+                Object result = compareHistMethod.invoke(null, 
+                    hist1.getRealInstance(), hist2.getRealInstance(), method);
+                return ((Number) result).doubleValue();
+            } catch (Exception e) {
+                logger.debug("Histogram comparison failed", e);
+            }
+        }
+        return 0.0;
+    }
+    
 }
 

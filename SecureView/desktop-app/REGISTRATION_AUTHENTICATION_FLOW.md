@@ -212,3 +212,4 @@ Match: YES
 
 **Summary**: Registration happens FIRST and stores your face embedding. Authentication compares the current face with the registered face embedding to determine if it's the same person.
 
+

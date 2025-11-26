@@ -13,13 +13,13 @@ if defined OPENCV_DIR (
     if exist "!OPENCV_DIR!\build\java\opencv-4120.jar" (
         set "OPENCV_JAR=!OPENCV_DIR!\build\java\opencv-4120.jar"
         set "OPENCV_DLL_DIR=!OPENCV_DIR!\build\java\x64"
+        set "OPENCV_DIR=!OPENCV_DIR!"
         echo Found OpenCV at: !OPENCV_DIR!
     )
 )
 
 REM If not found, try common paths
 if not defined OPENCV_JAR (
-    REM Check user's OpenCV installation first
     if exist "C:\Users\TUSHAR\Downloads\opencv\build\java\opencv-4120.jar" (
         set "OPENCV_JAR=C:\Users\TUSHAR\Downloads\opencv\build\java\opencv-4120.jar"
         set "OPENCV_DLL_DIR=C:\Users\TUSHAR\Downloads\opencv\build\java\x64"
@@ -40,13 +40,9 @@ if not defined OPENCV_JAR (
 
 REM Add OpenCV DLL directory to PATH for this session
 if defined OPENCV_DLL_DIR (
-    call set "PATH=!OPENCV_DLL_DIR!;%%PATH%%"
+    set "CURRENT_PATH=!PATH!"
+    set "PATH=!OPENCV_DLL_DIR!;!CURRENT_PATH!"
     echo Added OpenCV DLL directory to PATH
-)
-
-REM Set OPENCV_DIR environment variable for Java
-if defined OPENCV_DIR (
-    set "OPENCV_DIR=!OPENCV_DIR!"
 )
 
 REM Run the application
@@ -77,4 +73,3 @@ if errorlevel 1 (
 )
 
 endlocal
-

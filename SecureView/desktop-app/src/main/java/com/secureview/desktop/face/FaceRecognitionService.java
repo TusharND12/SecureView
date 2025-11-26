@@ -5,6 +5,7 @@ import com.secureview.desktop.encryption.EncryptionService;
 import com.secureview.desktop.face.detection.FaceDetector;
 import com.secureview.desktop.face.embedding.FaceEmbeddingExtractor;
 import com.secureview.desktop.face.liveness.LivenessDetector;
+import com.secureview.desktop.face.comparison.ImageComparisonService;
 import com.secureview.desktop.opencv.stub.Mat;
 import com.secureview.desktop.opencv.stub.Imgcodecs;
 import org.slf4j.Logger;
@@ -13,7 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Arrays;
+import java.util.List;
 
 /**
  * Main service for face recognition operations.
@@ -26,6 +27,7 @@ public class FaceRecognitionService {
     private FaceDetector faceDetector;
     private FaceEmbeddingExtractor embeddingExtractor;
     private LivenessDetector livenessDetector;
+    private ImageComparisonService imageComparisonService;
     private EncryptionService encryptionService;
     private ConfigManager configManager;
     
@@ -54,6 +56,8 @@ public class FaceRecognitionService {
         embeddingExtractor = new FaceEmbeddingExtractor();
         embeddingExtractor.initialize();
         
+        imageComparisonService = new ImageComparisonService();
+        
         if (configManager.getConfig().isLivenessDetectionEnabled()) {
             livenessDetector = new LivenessDetector();
             livenessDetector.initialize();
@@ -63,12 +67,34 @@ public class FaceRecognitionService {
     }
     
     /**
-     * Checks if a user is registered (has stored face embedding).
+     * Checks if a user is registered (has stored face images or embedding).
      */
     public boolean isUserRegistered() {
+        // Check for image-based registration (new method)
+        String imageDataPath = getImageDataPath();
+        File imageDataDir = new File(imageDataPath);
+        if (imageDataDir.exists() && imageDataDir.isDirectory()) {
+            File[] imageFiles = imageDataDir.listFiles((d, name) -> 
+                name.toLowerCase().endsWith(".jpg") || 
+                name.toLowerCase().endsWith(".jpeg") || 
+                name.toLowerCase().endsWith(".png"));
+            if (imageFiles != null && imageFiles.length > 0) {
+                return true;
+            }
+        }
+        
+        // Fallback: check for embedding-based registration (old method)
         String dataDir = configManager.getConfig().getDataDirectory();
         File embeddingFile = new File(dataDir, EMBEDDING_FILE);
         return embeddingFile.exists();
+    }
+    
+    /**
+     * Gets the path to the Image Data folder.
+     */
+    private String getImageDataPath() {
+        // Use the user-specified path
+        return "T:\\COLLEGE LIFE\\projects\\SecureView\\SecureView\\desktop-app\\Image Data";
     }
     
     /**
@@ -105,6 +131,25 @@ public class FaceRecognitionService {
             File registeredFacesDir = new File(dataDir, REGISTERED_FACES_DIR);
             if (registeredFacesDir.exists() && registeredFacesDir.listFiles().length == 0) {
                 registeredFacesDir.delete();
+            }
+            
+            // Delete image-based registration (Image Data folder)
+            String imageDataPath = getImageDataPath();
+            File imageDataDir = new File(imageDataPath);
+            if (imageDataDir.exists() && imageDataDir.isDirectory()) {
+                File[] imageFiles = imageDataDir.listFiles((d, name) -> 
+                    name.toLowerCase().endsWith(".jpg") || 
+                    name.toLowerCase().endsWith(".jpeg") || 
+                    name.toLowerCase().endsWith(".png"));
+                if (imageFiles != null) {
+                    for (File file : imageFiles) {
+                        boolean fileDeleted = file.delete();
+                        if (!fileDeleted) {
+                            logger.warn("Failed to delete image file: {}", file.getName());
+                        }
+                    }
+                    logger.info("Deleted {} image files from Image Data folder", imageFiles.length);
+                }
             }
             
             if (deleted) {
@@ -194,8 +239,79 @@ public class FaceRecognitionService {
     }
     
     /**
-     * Authenticates a user by comparing their face with stored embedding.
-     * This compares the current face with the face registered during registration.
+     * Registers a user with multiple face angles (360-degree style).
+     * Saves all face images to the Image Data folder.
+     */
+    public boolean registerUserMultiAngle(List<Mat> faceImages) throws Exception {
+        logger.info("=== MULTI-ANGLE REGISTRATION PROCESS STARTED ===");
+        logger.info("Registering user with {} face angles...", faceImages.size());
+        
+        if (faceImages == null || faceImages.isEmpty()) {
+            logger.error("No face images provided for registration");
+            return false;
+        }
+        
+        // Create Image Data directory
+        String imageDataPath = getImageDataPath();
+        File imageDataDir = new File(imageDataPath);
+        Files.createDirectories(Paths.get(imageDataPath));
+        logger.info("Image Data directory: {}", imageDataPath);
+        
+        // Clear existing images in the directory
+        File[] existingFiles = imageDataDir.listFiles((d, name) -> 
+            name.toLowerCase().endsWith(".jpg") || 
+            name.toLowerCase().endsWith(".jpeg") || 
+            name.toLowerCase().endsWith(".png"));
+        if (existingFiles != null) {
+            for (File file : existingFiles) {
+                file.delete();
+                logger.debug("Deleted existing image: {}", file.getName());
+            }
+        }
+        
+        // Save each face image
+        int savedCount = 0;
+        for (int i = 0; i < faceImages.size(); i++) {
+            Mat faceImage = faceImages.get(i);
+            if (faceImage == null || faceImage.empty()) {
+                logger.warn("Skipping empty face image at index {}", i);
+                continue;
+            }
+            
+            String imageFileName = String.format("face_angle_%03d.jpg", i + 1);
+            String imagePath = imageDataPath + File.separator + imageFileName;
+            
+            boolean saved = Imgcodecs.imwrite(imagePath, faceImage);
+            if (saved) {
+                savedCount++;
+                logger.info("Saved face image {}: {}", i + 1, imagePath);
+                
+                // Verify file was created
+                File savedFile = new File(imagePath);
+                if (savedFile.exists()) {
+                    logger.debug("Verified: Image file exists. Size: {} bytes", savedFile.length());
+                } else {
+                    logger.warn("Warning: Image file was not created at: {}", imagePath);
+                }
+            } else {
+                logger.error("Failed to save face image {} to: {}", i + 1, imagePath);
+            }
+        }
+        
+        if (savedCount == 0) {
+            logger.error("Failed to save any face images");
+            return false;
+        }
+        
+        logger.info("=== MULTI-ANGLE REGISTRATION COMPLETE ===");
+        logger.info("Saved {}/{} face images to: {}", savedCount, faceImages.size(), imageDataPath);
+        logger.info("User registered successfully with {} face angles.", savedCount);
+        return true;
+    }
+    
+    /**
+     * Authenticates a user by comparing their face with stored images.
+     * Uses image-based comparison if images are available, otherwise falls back to embedding-based.
      * @return similarity score (0.0 to 1.0), where 1.0 is perfect match
      */
     public double authenticateUser(Mat faceImage) throws Exception {
@@ -221,9 +337,51 @@ public class FaceRecognitionService {
             }
         }
         
+        // Try image-based authentication first (new method)
+        String imageDataPath = getImageDataPath();
+        File imageDataDir = new File(imageDataPath);
+        if (imageDataDir.exists() && imageDataDir.isDirectory()) {
+            File[] imageFiles = imageDataDir.listFiles((d, name) -> 
+                name.toLowerCase().endsWith(".jpg") || 
+                name.toLowerCase().endsWith(".jpeg") || 
+                name.toLowerCase().endsWith(".png"));
+            
+            if (imageFiles != null && imageFiles.length > 0) {
+                logger.debug("Using image-based authentication with {} reference images", imageFiles.length);
+                
+                // Load reference images
+                List<Mat> referenceImages = imageComparisonService.loadReferenceImages(imageDataPath);
+                if (!referenceImages.isEmpty()) {
+                    // Compare current face with all reference images
+                    double similarity = imageComparisonService.compareWithImages(faceImage, referenceImages);
+                    
+                    // Cleanup reference images
+                    for (Mat img : referenceImages) {
+                        img.release();
+                    }
+                    
+                    logger.info("=== AUTHENTICATION RESULT (Image-based) ===");
+                    logger.info("Face similarity score: {} (1.0 = perfect match, 0.0 = no match)", similarity);
+                    logger.info("Threshold: {}", configManager.getConfig().getFaceRecognitionThreshold());
+                    logger.info("Match: {}", similarity >= configManager.getConfig().getFaceRecognitionThreshold() ? "YES" : "NO");
+                    
+                    return similarity;
+                }
+            }
+        }
+        
+        // Fallback to embedding-based authentication (old method)
+        logger.debug("Falling back to embedding-based authentication...");
+        String dataDir = configManager.getConfig().getDataDirectory();
+        File embeddingFile = new File(dataDir, EMBEDDING_FILE);
+        
+        if (!embeddingFile.exists()) {
+            logger.error("No embedding file found and no images found. Registration may be incomplete.");
+            return 0.0;
+        }
+        
         // Load stored embedding (from registration)
         logger.debug("Step 1: Loading registered face embedding...");
-        String dataDir = configManager.getConfig().getDataDirectory();
         byte[] encryptedData = Files.readAllBytes(Paths.get(dataDir, EMBEDDING_FILE));
         byte[] decryptedData = encryptionService.decrypt(encryptedData);
         double[] storedEmbedding = convertFromBytes(decryptedData);
@@ -242,34 +400,7 @@ public class FaceRecognitionService {
         logger.debug("Step 3: Comparing registered face with current face...");
         double similarity = calculateCosineSimilarity(storedEmbedding, currentEmbedding);
         
-        // Additional check: Compare with stored face image if available
-        String registeredFacePath = dataDir + File.separator + REGISTERED_FACES_DIR + File.separator + REGISTERED_FACE_IMAGE;
-        File registeredFaceFile = new File(registeredFacePath);
-        
-        if (registeredFaceFile.exists()) {
-            try {
-                // Load registered face image
-                Mat registeredFaceImage = Imgcodecs.imread(registeredFacePath);
-                if (!registeredFaceImage.empty()) {
-                    // Extract embedding from stored image for comparison
-                    double[] registeredImageEmbedding = embeddingExtractor.extractEmbedding(registeredFaceImage);
-                    if (registeredImageEmbedding != null && registeredImageEmbedding.length > 0) {
-                        // Compare with stored image embedding
-                        double imageSimilarity = calculateCosineSimilarity(registeredImageEmbedding, currentEmbedding);
-                        logger.debug("Similarity with stored image: {}", imageSimilarity);
-                        
-                        // Use the higher similarity score
-                        similarity = Math.max(similarity, imageSimilarity);
-                        logger.debug("Using maximum similarity: {}", similarity);
-                    }
-                    registeredFaceImage.release();
-                }
-            } catch (Exception e) {
-                logger.warn("Could not load registered face image for comparison", e);
-            }
-        }
-        
-        logger.info("=== AUTHENTICATION RESULT ===");
+        logger.info("=== AUTHENTICATION RESULT (Embedding-based) ===");
         logger.info("Face similarity score: {} (1.0 = perfect match, 0.0 = no match)", similarity);
         logger.info("Threshold: {}", configManager.getConfig().getFaceRecognitionThreshold());
         logger.info("Match: {}", similarity >= configManager.getConfig().getFaceRecognitionThreshold() ? "YES" : "NO");

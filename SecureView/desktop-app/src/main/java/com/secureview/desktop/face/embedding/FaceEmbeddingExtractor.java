@@ -5,8 +5,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 
 /**
  * Extracts face embeddings using a deep learning model.
@@ -16,22 +14,63 @@ public class FaceEmbeddingExtractor {
     private static final Logger logger = LoggerFactory.getLogger(FaceEmbeddingExtractor.class);
     
     private Net faceNet = null;
-    private static final int EMBEDDING_SIZE = 128;
-    private static final Size INPUT_SIZE = new Size(96, 96);
+    private String modelType = null; // "facenet", "openface", "sface", or null
+    
+    // FaceNet uses 512-dim embeddings and 160x160 input
+    // Other models (OpenFace, SFace) use 128-dim and 96x96 input
+    private int embeddingSize = 128;
+    private Size inputSize = new Size(96, 96);
     
     public void initialize() throws Exception {
         logger.info("Initializing Face Embedding Extractor...");
         
-        // For production, you would load a pre-trained model like OpenFace or FaceNet
-        // For now, we'll use a simplified approach with OpenCV's DNN
-        // In a real implementation, you would download and load a proper face recognition model
+        // Try to load a pre-trained face recognition model
+        // Supported models: FaceNet, OpenFace, ArcFace, SFace (OpenCV)
+        // Model formats: .onnx, .pb (TensorFlow), .t7/.net (Torch)
         
-        // Note: This is a placeholder. In production, you need to:
-        // 1. Download a pre-trained face recognition model (e.g., OpenFace, FaceNet)
-        // 2. Load it using Dnn.readNetFromTorch() or Dnn.readNetFromTensorflow()
-        // 3. Use it to extract embeddings
+        // Prioritize FaceNet - check common model locations
+        String[] possiblePaths = {
+            System.getProperty("user.home") + "/.secureview/models/facenet.onnx",
+            System.getProperty("user.home") + "/.secureview/models/facenet.pb",
+            System.getProperty("user.home") + "/.secureview/models/sface.onnx",
+            System.getProperty("user.home") + "/.secureview/models/face_recognition_sface_2021dec.onnx", // Original SFace filename
+            System.getProperty("user.home") + "/.secureview/models/openface.t7",
+            "models/facenet.onnx",
+            "models/facenet.pb",
+            "models/sface.onnx",
+            "models/openface.t7"
+        };
         
-        logger.warn("Using simplified embedding extraction. For production, load a proper face recognition model.");
+        boolean modelLoaded = false;
+        for (String modelPath : possiblePaths) {
+            File modelFile = new File(modelPath);
+            if (modelFile.exists()) {
+                try {
+                    loadModel(modelPath);
+                    logger.info("Face recognition model loaded successfully from: {}", modelPath);
+                    modelLoaded = true;
+                    break;
+                } catch (Exception e) {
+                    logger.warn("Failed to load model from: {}", modelPath, e);
+                }
+            }
+        }
+        
+        if (!modelLoaded) {
+            logger.warn("No face recognition model found. Using simplified embedding extraction.");
+            logger.warn("For better accuracy, download FaceNet model:");
+            logger.warn("  - FaceNet ONNX: Download from TensorFlow Hub and convert to ONNX");
+            logger.warn("  - FaceNet TensorFlow: https://tfhub.dev/google/facenet/1");
+            logger.warn("  - Alternative: SFace (OpenCV): https://github.com/opencv/opencv_zoo/tree/master/models/face_recognition_sface");
+            logger.warn("Place the model file in: ~/.secureview/models/facenet.onnx or facenet.pb");
+        } else {
+            logger.info("Model loaded successfully. Type: {}, Embedding size: {}, Input size: {}x{}", 
+                       modelType != null ? modelType : "unknown", 
+                       embeddingSize, 
+                       (int)inputSize.width, 
+                       (int)inputSize.height);
+        }
+        
         logger.info("Face Embedding Extractor initialized");
     }
     
@@ -56,6 +95,12 @@ public class FaceEmbeddingExtractor {
             if (faceNet != null) {
                 // Use DNN model if available
                 embedding = extractWithDNN(processed);
+                
+                // If DNN extraction failed (e.g., OpenCV DNN not available), fallback
+                if (embedding == null || embedding.length == 0) {
+                    logger.warn("DNN embedding extraction failed or returned empty result. Falling back to simplified embedding.");
+                    embedding = extractSimplified(processed);
+                }
             } else {
                 // Fallback to simplified feature extraction
                 embedding = extractSimplified(processed);
@@ -72,36 +117,53 @@ public class FaceEmbeddingExtractor {
     
     /**
      * Preprocesses face image for embedding extraction.
+     * FaceNet requires 160x160 input with specific preprocessing.
      */
     private Mat preprocessFace(Mat faceImage) {
         Mat resized = new Mat();
-        Imgproc.resize(faceImage, resized, INPUT_SIZE);
+        Imgproc.resize(faceImage, resized, inputSize);
         
-        Mat gray = new Mat();
-        if (resized.channels() == 3) {
-            Imgproc.cvtColor(resized, gray, Imgproc.COLOR_BGR2GRAY);
+        // FaceNet and most models expect RGB/BGR color images, not grayscale
+        // Keep color if available, convert to BGR if needed
+        Mat processed = new Mat();
+        if (resized.channels() == 1) {
+            // Convert grayscale to BGR
+            Imgproc.cvtColor(resized, processed, Imgproc.COLOR_GRAY2BGR);
+            resized.release();
+        } else if (resized.channels() == 4) {
+            // Convert RGBA to BGR
+            Imgproc.cvtColor(resized, processed, Imgproc.COLOR_BGRA2BGR);
+            resized.release();
         } else {
-            gray = resized;
+            processed = resized;
         }
         
-        // Normalize to [0, 1]
+        // FaceNet expects pixel values normalized to [-1, 1] range
+        // Other models typically use [0, 1]
         Mat normalized = new Mat();
-        gray.convertTo(normalized, CvType.CV_32F, 1.0 / 255.0);
-        
-        resized.release();
-        if (gray != resized) {
-            gray.release();
+        if ("facenet".equals(modelType)) {
+            // FaceNet: normalize to [-1, 1] range
+            processed.convertTo(normalized, CvType.CV_32F, 2.0 / 255.0, -1.0);
+        } else {
+            // Other models: normalize to [0, 1] range
+            processed.convertTo(normalized, CvType.CV_32F, 1.0 / 255.0);
         }
+        
+        // Release intermediate matrices
+        processed.release();
         
         return normalized;
     }
     
     /**
      * Extracts embedding using DNN model.
+     * Supports FaceNet (512-dim) and other models (128-dim).
      */
     private double[] extractWithDNN(Mat processed) {
         // Create blob from image
-        Mat blob = Dnn.blobFromImage(processed, 1.0, INPUT_SIZE, new Scalar(0, 0, 0), false, false);
+        // FaceNet: scale=1.0, mean subtraction not needed (already normalized)
+        // swapRB=false (already in BGR), crop=false
+        Mat blob = Dnn.blobFromImage(processed, 1.0, inputSize, new Scalar(0, 0, 0), false, false);
         
         // Set input
         faceNet.setInput(blob);
@@ -109,11 +171,45 @@ public class FaceEmbeddingExtractor {
         // Forward pass
         Mat output = faceNet.forward();
         
-        // Extract embedding
-        double[] embedding = new double[EMBEDDING_SIZE];
-        output.get(0, 0, embedding);
+        // Ensure output contains data
+        if (output == null || output.empty() || output.total() == 0) {
+            logger.error("DNN forward pass returned empty output. Check OpenCV DNN installation.");
+            blob.release();
+            output.release();
+            return null;
+        }
         
-        // Normalize embedding
+        // Extract embedding - size depends on model type
+        int actualSize = (int) output.total();
+        if (actualSize != embeddingSize) {
+            logger.debug("Model output size ({}) differs from expected ({}), using actual size", actualSize, embeddingSize);
+            embeddingSize = actualSize;
+        }
+        
+        double[] embedding = new double[embeddingSize];
+        
+        // Extract embedding from output
+        double[] flatOutput = new double[(int) output.total()];
+        output.get(0, 0, flatOutput);
+        
+        if (flatOutput.length == 0) {
+            logger.error("DNN output array is empty. Falling back to simplified embedding.");
+            blob.release();
+            output.release();
+            return null;
+        }
+        
+        // Copy to embedding array (handle different output shapes)
+        int copyLength = Math.min(embeddingSize, flatOutput.length);
+        System.arraycopy(flatOutput, 0, embedding, 0, copyLength);
+        
+        // If output is smaller than expected, pad with zeros
+        if (flatOutput.length < embeddingSize) {
+            logger.warn("Model output size ({}) is smaller than expected ({}), padding with zeros", 
+                       flatOutput.length, embeddingSize);
+        }
+        
+        // Normalize embedding (L2 normalization)
         normalizeEmbedding(embedding);
         
         blob.release();
@@ -128,7 +224,7 @@ public class FaceEmbeddingExtractor {
      */
     private double[] extractSimplified(Mat processed) {
         // This is a simplified approach. In production, use a proper DNN model.
-        double[] embedding = new double[EMBEDDING_SIZE];
+        double[] embedding = new double[embeddingSize];
         
         // Extract histogram features
         Mat hist = new Mat();
@@ -181,7 +277,10 @@ public class FaceEmbeddingExtractor {
     
     /**
      * Loads a pre-trained face recognition model.
-     * Call this method with the path to your model file.
+     * Automatically detects model type (FaceNet, OpenFace, SFace) and configures accordingly.
+     * 
+     * FaceNet: 160x160 input, 512-dim embeddings
+     * OpenFace/SFace: 96x96 input, 128-dim embeddings
      */
     public void loadModel(String modelPath) throws Exception {
         File modelFile = new File(modelPath);
@@ -189,7 +288,27 @@ public class FaceEmbeddingExtractor {
             throw new Exception("Model file not found: " + modelPath);
         }
         
-        // Determine model type and load accordingly
+        // Detect model type from filename
+        String lowerPath = modelPath.toLowerCase();
+        if (lowerPath.contains("facenet")) {
+            modelType = "facenet";
+            embeddingSize = 512;
+            inputSize = new Size(160, 160);
+            logger.info("Detected FaceNet model - using 160x160 input, 512-dim embeddings");
+        } else if (lowerPath.contains("openface") || lowerPath.contains("sface")) {
+            modelType = lowerPath.contains("openface") ? "openface" : "sface";
+            embeddingSize = 128;
+            inputSize = new Size(96, 96);
+            logger.info("Detected {} model - using 96x96 input, 128-dim embeddings", modelType);
+        } else {
+            // Default to OpenFace/SFace settings
+            modelType = "unknown";
+            embeddingSize = 128;
+            inputSize = new Size(96, 96);
+            logger.warn("Unknown model type, defaulting to 96x96 input, 128-dim embeddings");
+        }
+        
+        // Determine model format and load accordingly
         if (modelPath.endsWith(".onnx")) {
             faceNet = Dnn.readNetFromONNX(modelPath);
         } else if (modelPath.endsWith(".pb")) {
@@ -201,6 +320,22 @@ public class FaceEmbeddingExtractor {
         }
         
         logger.info("Face recognition model loaded from: {}", modelPath);
+        logger.info("Model configuration: {}x{} input, {}-dim embeddings", 
+                    (int)inputSize.width, (int)inputSize.height, embeddingSize);
+    }
+    
+    /**
+     * Gets the current embedding size (128 for OpenFace/SFace, 512 for FaceNet).
+     */
+    public int getEmbeddingSize() {
+        return embeddingSize;
+    }
+    
+    /**
+     * Gets the current model type.
+     */
+    public String getModelType() {
+        return modelType != null ? modelType : "none";
     }
 }
 

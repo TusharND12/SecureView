@@ -33,7 +33,13 @@ public class RegistrationWindow extends JFrame {
     private VideoCapture camera;
     private Timer captureTimer;
     private AtomicBoolean isProcessing = new AtomicBoolean(false);
-    private Mat capturedFace = null;
+    private java.util.List<Mat> capturedFaces = new java.util.ArrayList<>();
+    private int currentAngle = 0;
+    private static final int[] ANGLES = {0, 45, 90, 135, 180, 225, 270, 315}; // 8 angles for 360-degree capture
+    private static final String[] ANGLE_NAMES = {
+        "Front", "Right 45°", "Right 90°", "Right 135°", 
+        "Back 180°", "Left 135°", "Left 90°", "Left 45°"
+    };
     
     public RegistrationWindow(
             FaceRecognitionService faceRecognitionService,
@@ -62,15 +68,16 @@ public class RegistrationWindow extends JFrame {
         
         // Status panel
         JPanel statusPanel = new JPanel(new BorderLayout());
-        statusLabel = new JLabel("<html><center><b>Step 1:</b> Position your face in front of the camera<br>" +
-            "<b>Step 2:</b> Click 'Capture Face' when ready<br>" +
-            "<b>Step 3:</b> Click 'Finish Registration' to complete</center></html>", 
+        statusLabel = new JLabel("<html><center><b>360° Face Registration</b><br>" +
+            "We'll capture your face from multiple angles<br>" +
+            "Position your face: <b>Front</b> (0°)<br>" +
+            "Captured: 0/8 angles</center></html>", 
             JLabel.CENTER);
         statusLabel.setFont(new Font("Arial", Font.PLAIN, 13));
         
         // Button panel
         JPanel buttonPanel = new JPanel(new FlowLayout());
-        captureButton = new JButton("Capture Face");
+        captureButton = new JButton("Capture Current Angle");
         captureButton.addActionListener(e -> captureFace());
         
         finishButton = new JButton("Finish Registration");
@@ -183,21 +190,29 @@ public class RegistrationWindow extends JFrame {
         
         // Check for face
         try {
-            Mat face = faceRecognitionService.detectFace(frame);
+                Mat face = faceRecognitionService.detectFace(frame);
             if (face != null) {
                 // Check if face is empty - use real OpenCV method if available
                 boolean isEmpty = face.empty();
                 if (!isEmpty) {
-                    statusLabel.setText("Face detected! Click 'Capture Face' to register.");
+                    String angleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : "Angle " + currentAngle;
+                    statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
+                        "Face detected! Position: <b>" + angleName + "</b><br>" +
+                        "Captured: " + capturedFaces.size() + "/8 angles<br>" +
+                        "Click 'Capture Current Angle' when ready</center></html>");
                     face.release();
                 } else {
-                    statusLabel.setText("No face detected. Please position your face in front of the camera.");
+                    statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
+                        "No face detected. Please position your face.<br>" +
+                        "Captured: " + capturedFaces.size() + "/8 angles</center></html>");
                     if (face != null) {
                         face.release();
                     }
                 }
             } else {
-                statusLabel.setText("No face detected. Please position your face in front of the camera.");
+                statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
+                    "No face detected. Please position your face.<br>" +
+                    "Captured: " + capturedFaces.size() + "/8 angles</center></html>");
             }
         } catch (Exception e) {
             logger.debug("Face detection error: {}", e.getMessage());
@@ -224,10 +239,19 @@ public class RegistrationWindow extends JFrame {
             return;
         }
         
+        if (capturedFaces.size() >= ANGLES.length) {
+            JOptionPane.showMessageDialog(this,
+                "All angles have been captured!\nClick 'Finish Registration' to complete.",
+                "All Angles Captured",
+                JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        
         isProcessing.set(true);
         captureButton.setEnabled(false);
+        String angleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : "Angle " + currentAngle;
         SwingUtilities.invokeLater(() -> {
-            statusLabel.setText("Capturing face... Please wait...");
+            statusLabel.setText("<html><center>Capturing <b>" + angleName + "</b>... Please wait...</center></html>");
         });
         
         new Thread(() -> {
@@ -281,16 +305,11 @@ public class RegistrationWindow extends JFrame {
                 }
                 
                 // Store captured face - create a proper copy
-                if (capturedFace != null) {
-                    capturedFace.release();
-                }
-                
-                // Create new Mat and copy face data
-                capturedFace = new Mat();
+                Mat faceCopy = new Mat();
                 try {
                     // Use real OpenCV copyTo if available
                     Object realFace = face.getRealInstance();
-                    Object realCaptured = capturedFace.getRealInstance();
+                    Object realCaptured = faceCopy.getRealInstance();
                     if (realFace != null && realCaptured != null) {
                         // Use reflection to call copyTo on real Mat
                         java.lang.reflect.Method copyToMethod = realFace.getClass().getMethod("copyTo", 
@@ -298,19 +317,34 @@ public class RegistrationWindow extends JFrame {
                         copyToMethod.invoke(realFace, realCaptured);
                     } else {
                         // Fallback to stub copyTo
-                        face.copyTo(capturedFace);
+                        face.copyTo(faceCopy);
                     }
                 } catch (Exception e) {
                     logger.warn("Error copying face Mat, using stub method", e);
-                    face.copyTo(capturedFace);
+                    face.copyTo(faceCopy);
                 }
                 face.release();
                 
+                // Add to captured faces list
+                capturedFaces.add(faceCopy);
+                currentAngle++;
+                
                 SwingUtilities.invokeLater(() -> {
-                    statusLabel.setText("Face captured! Click 'Finish Registration' to complete.");
-                    finishButton.setEnabled(true);
+                    if (capturedFaces.size() >= ANGLES.length) {
+                        statusLabel.setText("<html><center><b>All angles captured!</b><br>" +
+                            "Captured: " + capturedFaces.size() + "/8 angles<br>" +
+                            "Click 'Finish Registration' to complete</center></html>");
+                        finishButton.setEnabled(true);
+                        captureButton.setEnabled(false);
+                    } else {
+                        String nextAngleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : "Angle " + currentAngle;
+                        statusLabel.setText("<html><center><b>Angle " + (capturedFaces.size()) + " captured!</b><br>" +
+                            "Now position your face: <b>" + nextAngleName + "</b><br>" +
+                            "Captured: " + capturedFaces.size() + "/8 angles<br>" +
+                            "Click 'Capture Current Angle' for next angle</center></html>");
+                        captureButton.setEnabled(true);
+                    }
                     isProcessing.set(false);
-                    captureButton.setEnabled(true);
                 });
                 
             } catch (Exception e) {
@@ -325,22 +359,35 @@ public class RegistrationWindow extends JFrame {
     }
     
     private void finishRegistration() {
-        if (capturedFace == null || capturedFace.empty()) {
+        if (capturedFaces.isEmpty()) {
             JOptionPane.showMessageDialog(this,
-                "No face captured. Please capture a face first.",
+                "No faces captured. Please capture at least one angle first.",
                 "Registration Error",
                 JOptionPane.WARNING_MESSAGE);
             return;
         }
         
+        if (capturedFaces.size() < 3) {
+            int confirm = JOptionPane.showConfirmDialog(this,
+                "Only " + capturedFaces.size() + " angle(s) captured. For better security, " +
+                "it's recommended to capture at least 3-4 angles.\n\n" +
+                "Do you want to continue with " + capturedFaces.size() + " angle(s)?",
+                "Few Angles Captured",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE);
+            if (confirm != JOptionPane.YES_OPTION) {
+                return;
+            }
+        }
+        
         finishButton.setEnabled(false);
         captureButton.setEnabled(false);
-        statusLabel.setText("Registering user... Please wait...");
+        statusLabel.setText("<html><center>Registering user with " + capturedFaces.size() + " angles...<br>Please wait...</center></html>");
         
         new Thread(() -> {
             try {
-                logger.info("Starting registration process...");
-                boolean success = faceRecognitionService.registerUser(capturedFace);
+                logger.info("Starting registration process with {} face angles...", capturedFaces.size());
+                boolean success = faceRecognitionService.registerUserMultiAngle(capturedFaces);
                 
                 SwingUtilities.invokeLater(() -> {
                     if (success) {
@@ -432,9 +479,12 @@ public class RegistrationWindow extends JFrame {
         if (camera != null && camera.isOpened()) {
             camera.release();
         }
-        if (capturedFace != null) {
-            capturedFace.release();
+        for (Mat face : capturedFaces) {
+            if (face != null) {
+                face.release();
+            }
         }
+        capturedFaces.clear();
         super.dispose();
     }
 }

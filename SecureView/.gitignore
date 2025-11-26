@@ -23,6 +23,10 @@ android-app/.DS_Store
 **/intrusion_*.jpg
 **/attempts.log
 
+# Face image data (sensitive - contains user face images)
+**/Image Data/
+**/ImageData/
+
 # Firebase
 **/google-services.json
 **/service-account-*.json

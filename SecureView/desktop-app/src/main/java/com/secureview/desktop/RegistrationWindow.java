@@ -14,6 +14,7 @@ import com.secureview.desktop.opencv.stub.Videoio;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.secureview.desktop.ui.ModernTheme;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -21,6 +22,8 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -38,10 +41,13 @@ public class RegistrationWindow extends JFrame {
     private JLabel cameraLabel;
     private JLabel statusLabel;
     private JLabel angleProgressLabel;
-    private JProgressBar qualityBar;
+    private ModernTheme.AnimatedProgressBar qualityBar;
     private JTextField emailField;
-    private JButton captureButton;
-    private JButton finishButton;
+    private JTextField nameField;
+    private ModernTheme.ModernButton captureButton;
+    private ModernTheme.ModernButton finishButton;
+    private ModernTheme.StatusBadge statusBadge;
+    private JPanel cameraContainer;
     private VideoCapture camera;
     private Timer captureTimer;
     private AtomicBoolean isProcessing = new AtomicBoolean(false);
@@ -71,116 +77,190 @@ public class RegistrationWindow extends JFrame {
     }
     
     private void initializeUI() {
-        setTitle("SecureView - User Registration");
+        setTitle("SecureView - Face Registration");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
-        setSize(900, 620);
+        setSize(1100, 720);
         setLocationRelativeTo(null);
-        setAlwaysOnTop(true); // Keep window on top initially
-        setVisible(true); // Make sure it's visible
-        toFront(); // Bring to front
-        requestFocus(); // Request focus
+        setAlwaysOnTop(true);
+        getContentPane().setBackground(ModernTheme.PRIMARY_DARK);
         
-        // === HEADER BAR ===
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBackground(new Color(0x1f2933));
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+        // === MODERN HEADER ===
+        JPanel headerPanel = new ModernTheme.RoundedPanel(0, ModernTheme.SECONDARY_DARK);
+        headerPanel.setLayout(new BorderLayout());
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(20, 30, 20, 30));
         
-        JLabel titleLabel = new JLabel("SecureView");
-        titleLabel.setForeground(Color.WHITE);
-        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        JLabel titleLabel = new JLabel("🔒 SecureView");
+        titleLabel.setForeground(ModernTheme.TEXT_PRIMARY);
+        titleLabel.setFont(ModernTheme.getTitleFont());
         headerPanel.add(titleLabel, BorderLayout.WEST);
         
-        JLabel modeLabel = new JLabel("360° Face Registration");
-        modeLabel.setForeground(Color.LIGHT_GRAY);
-        modeLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        headerPanel.add(modeLabel, BorderLayout.EAST);
+        statusBadge = new ModernTheme.StatusBadge("● Registration Mode", ModernTheme.ACCENT_PURPLE);
+        statusBadge.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
+        headerPanel.add(statusBadge, BorderLayout.EAST);
         
         add(headerPanel, BorderLayout.NORTH);
         
         // === MAIN CONTENT ===
         JPanel mainPanel = new JPanel(new BorderLayout());
-        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        mainPanel.setOpaque(false);
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         
-        // Left: camera with angle chips
-        JPanel cameraPanel = new JPanel(new BorderLayout());
-        cameraPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(0xd1d5db)),
-            BorderFactory.createEmptyBorder(5, 5, 5, 5)
-        ));
+        // Left: Modern camera panel
+        cameraContainer = new ModernTheme.RoundedPanel(16, ModernTheme.SECONDARY_DARK);
+        cameraContainer.setLayout(new BorderLayout());
+        cameraContainer.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        
+        JLabel cameraCaption = new JLabel("📹 360° Face Capture");
+        cameraCaption.setFont(ModernTheme.getHeadingFont());
+        cameraCaption.setForeground(ModernTheme.TEXT_PRIMARY);
+        cameraCaption.setBorder(BorderFactory.createEmptyBorder(0, 0, 12, 0));
+        cameraContainer.add(cameraCaption, BorderLayout.NORTH);
         
         cameraLabel = new JLabel("Initializing camera...", JLabel.CENTER);
-        cameraLabel.setPreferredSize(new Dimension(640, 480));
-        cameraPanel.add(cameraLabel, BorderLayout.CENTER);
+        cameraLabel.setPreferredSize(new Dimension(720, 540));
+        cameraLabel.setForeground(ModernTheme.TEXT_SECONDARY);
+        cameraLabel.setFont(ModernTheme.getBodyFont());
+        cameraLabel.setVerticalAlignment(SwingConstants.CENTER);
+        cameraContainer.add(cameraLabel, BorderLayout.CENTER);
         
-        angleProgressLabel = new JLabel("Angles captured: 0 / " + ANGLES.length);
-        angleProgressLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        cameraPanel.add(angleProgressLabel, BorderLayout.SOUTH);
+        angleProgressLabel = new JLabel("📊 Angles captured: 0 / " + ANGLES.length);
+        angleProgressLabel.setFont(ModernTheme.getBodyFont());
+        angleProgressLabel.setForeground(ModernTheme.TEXT_SECONDARY);
+        angleProgressLabel.setBorder(BorderFactory.createEmptyBorder(12, 0, 0, 0));
+        cameraContainer.add(angleProgressLabel, BorderLayout.SOUTH);
         
-        mainPanel.add(cameraPanel, BorderLayout.CENTER);
+        mainPanel.add(cameraContainer, BorderLayout.CENTER);
         
-        // Right: smart registration panel
+        // Right: Modern registration panel
         JPanel sidePanel = new JPanel();
         sidePanel.setLayout(new BoxLayout(sidePanel, BoxLayout.Y_AXIS));
-        sidePanel.setBorder(BorderFactory.createEmptyBorder(0, 15, 0, 0));
-        sidePanel.setPreferredSize(new Dimension(260, 0));
+        sidePanel.setOpaque(false);
+        sidePanel.setBorder(BorderFactory.createEmptyBorder(0, 20, 0, 0));
+        sidePanel.setPreferredSize(new Dimension(320, 0));
 
-        // Email input
-        JPanel emailPanel = new JPanel(new BorderLayout());
-        emailPanel.setBorder(BorderFactory.createTitledBorder("Alert email"));
+        // Email input card
+        ModernTheme.RoundedPanel emailCard = new ModernTheme.RoundedPanel(16, ModernTheme.CARD_BG);
+        emailCard.setLayout(new BorderLayout());
+        emailCard.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        
+        JLabel emailTitle = new JLabel("📧 Alert Email");
+        emailTitle.setFont(ModernTheme.getHeadingFont());
+        emailTitle.setForeground(ModernTheme.TEXT_PRIMARY);
+        emailTitle.setBorder(BorderFactory.createEmptyBorder(0, 0, 12, 0));
+        emailCard.add(emailTitle, BorderLayout.NORTH);
+        
         emailField = new JTextField();
+        emailField.setFont(ModernTheme.getBodyFont());
+        emailField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ModernTheme.BORDER_COLOR),
+            BorderFactory.createEmptyBorder(10, 12, 10, 12)
+        ));
+        emailField.setBackground(ModernTheme.SECONDARY_DARK);
+        emailField.setForeground(ModernTheme.TEXT_PRIMARY);
         String existingEmail = configManager.getConfig().getAlertEmailTo();
         if (existingEmail != null && !existingEmail.isEmpty()) {
             emailField.setText(existingEmail);
         }
-        emailPanel.add(emailField, BorderLayout.CENTER);
-        JLabel emailHint = new JLabel("<html><small>We will send intrusion alerts to this email.</small></html>");
-        emailPanel.add(emailHint, BorderLayout.SOUTH);
-        sidePanel.add(emailPanel);
-        sidePanel.add(Box.createVerticalStrut(8));
+        emailCard.add(emailField, BorderLayout.CENTER);
         
-        // Quality meter
-        JPanel qualityPanel = new JPanel(new BorderLayout());
-        qualityPanel.setBorder(BorderFactory.createTitledBorder("Face quality"));
-        qualityBar = new JProgressBar(0, 100);
-        qualityBar.setStringPainted(true);
+        JLabel emailHint = new JLabel("<html><small style='color: #94A3B8;'>We'll send intrusion alerts to this email</small></html>");
+        emailHint.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
+        emailCard.add(emailHint, BorderLayout.SOUTH);
+        sidePanel.add(emailCard);
+        sidePanel.add(Box.createVerticalStrut(16));
+        
+        // Name input card
+        ModernTheme.RoundedPanel nameCard = new ModernTheme.RoundedPanel(16, ModernTheme.CARD_BG);
+        nameCard.setLayout(new BorderLayout());
+        nameCard.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        
+        JLabel nameTitle = new JLabel("👤 Your Name");
+        nameTitle.setFont(ModernTheme.getHeadingFont());
+        nameTitle.setForeground(ModernTheme.TEXT_PRIMARY);
+        nameTitle.setBorder(BorderFactory.createEmptyBorder(0, 0, 12, 0));
+        nameCard.add(nameTitle, BorderLayout.NORTH);
+        
+        nameField = new JTextField();
+        nameField.setFont(ModernTheme.getBodyFont());
+        nameField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ModernTheme.BORDER_COLOR),
+            BorderFactory.createEmptyBorder(10, 12, 10, 12)
+        ));
+        nameField.setBackground(ModernTheme.SECONDARY_DARK);
+        nameField.setForeground(ModernTheme.TEXT_PRIMARY);
+        nameField.setToolTipText("Enter your name");
+        nameCard.add(nameField, BorderLayout.CENTER);
+        
+        JLabel nameHint = new JLabel("<html><small style='color: #94A3B8;'>We'll greet you by name when you authenticate</small></html>");
+        nameHint.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
+        nameCard.add(nameHint, BorderLayout.SOUTH);
+        sidePanel.add(nameCard);
+        sidePanel.add(Box.createVerticalStrut(16));
+        
+        // Quality meter card
+        ModernTheme.RoundedPanel qualityCard = new ModernTheme.RoundedPanel(16, ModernTheme.CARD_BG);
+        qualityCard.setLayout(new BorderLayout());
+        qualityCard.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        
+        JLabel qualityTitle = new JLabel("✨ Face Quality");
+        qualityTitle.setFont(ModernTheme.getHeadingFont());
+        qualityTitle.setForeground(ModernTheme.TEXT_PRIMARY);
+        qualityTitle.setBorder(BorderFactory.createEmptyBorder(0, 0, 16, 0));
+        qualityCard.add(qualityTitle, BorderLayout.NORTH);
+        
+        qualityBar = new ModernTheme.AnimatedProgressBar();
+        qualityBar.setPreferredSize(new Dimension(0, 40));
         qualityBar.setString("Waiting for face...");
         qualityBar.setValue(0);
-        qualityPanel.add(qualityBar, BorderLayout.CENTER);
+        qualityCard.add(qualityBar, BorderLayout.CENTER);
+        sidePanel.add(qualityCard);
+        sidePanel.add(Box.createVerticalStrut(16));
         
-        sidePanel.add(qualityPanel);
+        // Status card
+        ModernTheme.RoundedPanel statusCard = new ModernTheme.RoundedPanel(16, ModernTheme.CARD_BG);
+        statusCard.setLayout(new BorderLayout());
+        statusCard.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         
-        // Status text / feedback
-        JPanel statusPanel = new JPanel(new BorderLayout());
-        statusPanel.setBorder(BorderFactory.createTitledBorder("Instructions"));
-        statusLabel = new JLabel("<html><center>We'll capture your face from multiple angles.<br>" +
-            "Start by facing the camera: <b>Front (0°)</b> and enter your email above for alerts.</center></html>", JLabel.CENTER);
-        statusLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        statusPanel.add(statusLabel, BorderLayout.CENTER);
+        JLabel statusTitle = new JLabel("📋 Instructions");
+        statusTitle.setFont(ModernTheme.getHeadingFont());
+        statusTitle.setForeground(ModernTheme.TEXT_PRIMARY);
+        statusTitle.setBorder(BorderFactory.createEmptyBorder(0, 0, 16, 0));
+        statusCard.add(statusTitle, BorderLayout.NORTH);
         
-        sidePanel.add(Box.createVerticalStrut(8));
-        sidePanel.add(statusPanel);
+        statusLabel = new JLabel("<html><div style='text-align: center; color: #94A3B8;'>We'll capture your face from multiple angles.<br><br>Start by facing the camera: <b style='color: #3B82F6;'>Front (0°)</b><br>and enter your email above for alerts.</div></html>");
+        statusLabel.setFont(ModernTheme.getBodyFont());
+        statusCard.add(statusLabel, BorderLayout.CENTER);
+        sidePanel.add(statusCard);
+        sidePanel.add(Box.createVerticalStrut(16));
         
-        // Buttons (stacked so both are always visible, even on smaller screens)
-        JPanel buttonPanel = new JPanel();
-        buttonPanel.setLayout(new GridLayout(2, 1, 0, 6));
+        // Buttons card
+        ModernTheme.RoundedPanel buttonCard = new ModernTheme.RoundedPanel(16, ModernTheme.CARD_BG);
+        buttonCard.setLayout(new BoxLayout(buttonCard, BoxLayout.Y_AXIS));
+        buttonCard.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         
-        captureButton = new JButton("Capture current angle");
+        captureButton = new ModernTheme.ModernButton("📸 Capture Current Angle", true);
+        captureButton.setPreferredSize(new Dimension(0, 50));
+        captureButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
         captureButton.addActionListener(e -> captureFace());
+        buttonCard.add(captureButton);
+        buttonCard.add(Box.createVerticalStrut(12));
         
-        finishButton = new JButton("Finish registration");
+        finishButton = new ModernTheme.ModernButton("✅ Finish Registration", false);
+        finishButton.setPreferredSize(new Dimension(0, 50));
+        finishButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
         finishButton.setEnabled(false);
         finishButton.addActionListener(e -> finishRegistration());
+        buttonCard.add(finishButton);
         
-        buttonPanel.add(captureButton);
-        buttonPanel.add(finishButton);
-        
-        sidePanel.add(Box.createVerticalStrut(8));
-        sidePanel.add(buttonPanel);
-        
+        sidePanel.add(buttonCard);
         mainPanel.add(sidePanel, BorderLayout.EAST);
         
         add(mainPanel, BorderLayout.CENTER);
+        
+        setVisible(true);
+        toFront();
+        requestFocus();
     }
     
     private void startCamera() {
@@ -202,9 +282,9 @@ public class RegistrationWindow extends JFrame {
             
             logger.info("Camera opened successfully, setting properties...");
             
-            // Set camera resolution
-            camera.set(Videoio.CAP_PROP_FRAME_WIDTH, 640);
-            camera.set(Videoio.CAP_PROP_FRAME_HEIGHT, 480);
+            // Set camera resolution for modern display
+            camera.set(Videoio.CAP_PROP_FRAME_WIDTH, 1280);
+            camera.set(Videoio.CAP_PROP_FRAME_HEIGHT, 720);
             
             // Give camera time to adjust
             Thread.sleep(200);
@@ -286,17 +366,22 @@ public class RegistrationWindow extends JFrame {
                 int qualityPercent = (int) Math.round(quality.overallScore * 100.0);
                 qualityBar.setValue(qualityPercent);
                 qualityBar.setString("Quality: " + qualityPercent + "%");
+                if (qualityPercent > 70) {
+                    qualityBar.startAnimation();
+                } else {
+                    qualityBar.stopAnimation();
+                }
                 
                 // Angle detection
                 AngleDetector.AngleInfo angleInfo = angleDetector.detectAngle(face);
                 String angleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : angleInfo.angleName;
                 
-                statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
-                    "Face detected! Position: <b>" + angleName + "</b><br>" +
-                    quality.feedback + "<br>" +
-                    "Captured: " + capturedFaces.size() + "/" + ANGLES.length + " angles</center></html>");
+                statusLabel.setText("<html><div style='text-align: center; color: #94A3B8;'><b style='color: #3B82F6; font-size: 16px;'>360° Face Registration</b><br><br>" +
+                    "✅ Face detected! Position: <b style='color: #10B981;'>" + angleName + "</b><br>" +
+                    quality.feedback + "<br><br>" +
+                    "📊 Captured: <b>" + capturedFaces.size() + "/" + ANGLES.length + "</b> angles</div></html>");
                 
-                angleProgressLabel.setText("Angles captured: " + capturedFaces.size() + " / " + ANGLES.length);
+                angleProgressLabel.setText("📊 Angles captured: " + capturedFaces.size() + " / " + ANGLES.length);
                 
                 // Optional auto-capture when quality is optimal
                 if (quality.isOptimal && capturedFaces.size() < ANGLES.length && !isProcessing.get()) {
@@ -310,9 +395,10 @@ public class RegistrationWindow extends JFrame {
             } else {
                 qualityBar.setValue(0);
                 qualityBar.setString("Waiting for face...");
-                statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
-                    "No face detected. Please position your face.<br>" +
-                    "Captured: " + capturedFaces.size() + "/" + ANGLES.length + " angles</center></html>");
+                qualityBar.stopAnimation();
+                statusLabel.setText("<html><div style='text-align: center; color: #94A3B8;'><b style='color: #3B82F6; font-size: 16px;'>360° Face Registration</b><br><br>" +
+                    "👤 No face detected. Please position your face.<br><br>" +
+                    "📊 Captured: <b>" + capturedFaces.size() + "/" + ANGLES.length + "</b> angles</div></html>");
                 if (face != null) {
                     face.release();
                 }
@@ -330,8 +416,10 @@ public class RegistrationWindow extends JFrame {
     private void displayFrame(Mat frame) {
         try {
             BufferedImage image = matToBufferedImage(frame);
-            ImageIcon icon = new ImageIcon(image.getScaledInstance(640, 480, Image.SCALE_SMOOTH));
+            Image scaled = image.getScaledInstance(720, 540, Image.SCALE_SMOOTH);
+            ImageIcon icon = new ImageIcon(scaled);
             cameraLabel.setIcon(icon);
+            cameraLabel.setText(""); // Clear text when showing image
         } catch (Exception e) {
             logger.error("Error displaying frame", e);
         }
@@ -353,9 +441,12 @@ public class RegistrationWindow extends JFrame {
         isProcessing.set(true);
         captureButton.setEnabled(false);
         String angleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : "Angle " + currentAngle;
-        SwingUtilities.invokeLater(() -> {
-            statusLabel.setText("<html><center>Capturing <b>" + angleName + "</b>... Please wait...</center></html>");
-        });
+            SwingUtilities.invokeLater(() -> {
+                statusLabel.setText("<html><div style='text-align: center; color: #3B82F6;'><b>📸 Capturing " + angleName + "...</b><br>Please wait...</div></html>");
+                qualityBar.setString("Capturing...");
+                qualityBar.setValue(50);
+                qualityBar.startAnimation();
+            });
         
         new Thread(() -> {
             try {
@@ -450,17 +541,19 @@ public class RegistrationWindow extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 angleProgressLabel.setText("Angles captured: " + capturedFaces.size() + " / " + ANGLES.length);
                 if (capturedFaces.size() >= ANGLES.length) {
-                    statusLabel.setText("<html><center><b>All angles captured!</b><br>" +
-                        "Captured: " + capturedFaces.size() + "/" + ANGLES.length + " angles<br>" +
-                        "Click 'Finish registration' to complete</center></html>");
+                    statusLabel.setText("<html><div style='text-align: center; color: #10B981;'><b style='font-size: 18px;'>✅ All angles captured!</b><br><br>" +
+                        "📊 Captured: <b>" + capturedFaces.size() + "/" + ANGLES.length + "</b> angles<br><br>" +
+                        "Click <b>'Finish Registration'</b> to complete</div></html>");
                     finishButton.setEnabled(true);
                     captureButton.setEnabled(false);
+                    statusBadge.setBadgeColor(ModernTheme.SUCCESS_GREEN);
+                    statusBadge.setText("● Complete");
                 } else {
                     String nextAngleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : "Angle " + currentAngle;
-                    statusLabel.setText("<html><center><b>Angle " + (capturedFaces.size()) + " captured!</b><br>" +
-                        "Now position your face: <b>" + nextAngleName + "</b><br>" +
-                        "Captured: " + capturedFaces.size() + "/" + ANGLES.length + " angles<br>" +
-                        "You can wait for auto-capture or click 'Capture current angle'</center></html>");
+                    statusLabel.setText("<html><div style='text-align: center; color: #94A3B8;'><b style='color: #10B981; font-size: 16px;'>✅ Angle " + (capturedFaces.size()) + " captured!</b><br><br>" +
+                        "Now position your face: <b style='color: #3B82F6;'>" + nextAngleName + "</b><br><br>" +
+                        "📊 Captured: <b>" + capturedFaces.size() + "/" + ANGLES.length + "</b> angles<br><br>" +
+                        "You can wait for auto-capture or click 'Capture current angle'</div></html>");
                     captureButton.setEnabled(true);
                 }
                 isProcessing.set(false);
@@ -480,7 +573,9 @@ public class RegistrationWindow extends JFrame {
      */
     private void saveEmailToCsv(String email) {
         try {
-            File csvFile = new File(EMAIL_CSV_PATH);
+            String dataDir = configManager.getConfig().getDataDirectory();
+            Files.createDirectories(Paths.get(dataDir));
+            File csvFile = new File(dataDir, "Email Alert Data.csv");
             boolean exists = csvFile.exists();
 
             try (BufferedWriter writer = new BufferedWriter(new FileWriter(csvFile, true))) {
@@ -493,7 +588,7 @@ public class RegistrationWindow extends JFrame {
                 writer.write(ts + "," + safeEmail);
                 writer.newLine();
             }
-            logger.info("Saved alert email to CSV: {}", EMAIL_CSV_PATH);
+            logger.info("Saved alert email to CSV: {}", csvFile.getAbsolutePath());
         } catch (IOException e) {
             logger.warn("Failed to save alert email to CSV", e);
             JOptionPane.showMessageDialog(this,
@@ -501,6 +596,24 @@ public class RegistrationWindow extends JFrame {
                 "Email alerts may not work after restart.",
                 "Email Save Warning",
                 JOptionPane.WARNING_MESSAGE);
+        }
+    }
+    
+    /**
+     * Saves the user's name to a file.
+     */
+    private void saveUserName(String name) {
+        try {
+            String dataDir = configManager.getConfig().getDataDirectory();
+            Files.createDirectories(Paths.get(dataDir));
+            File nameFile = new File(dataDir, "user_name.txt");
+            
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(nameFile))) {
+                writer.write(name);
+            }
+            logger.info("Saved user name: {}", name);
+        } catch (IOException e) {
+            logger.warn("Failed to save user name", e);
         }
     }
     
@@ -523,8 +636,17 @@ public class RegistrationWindow extends JFrame {
             return;
         }
 
+        // Get and validate name
+        String userName = nameField != null ? nameField.getText().trim() : "";
+        if (userName.isEmpty()) {
+            userName = "User"; // Default name
+        }
+
         // Save alert email into CSV file
         saveEmailToCsv(email);
+        
+        // Save user name
+        saveUserName(userName);
         
         if (capturedFaces.size() < 3) {
             int confirm = JOptionPane.showConfirmDialog(this,

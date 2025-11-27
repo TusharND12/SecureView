@@ -6,6 +6,7 @@ import com.secureview.desktop.face.detection.FaceDetector;
 import com.secureview.desktop.face.embedding.FaceEmbeddingExtractor;
 import com.secureview.desktop.face.liveness.LivenessDetector;
 import com.secureview.desktop.face.comparison.ImageComparisonService;
+import com.secureview.desktop.face.alignment.FaceAligner;
 import com.secureview.desktop.opencv.stub.Mat;
 import com.secureview.desktop.opencv.stub.Imgcodecs;
 import org.slf4j.Logger;
@@ -167,38 +168,54 @@ public class FaceRecognitionService {
     
     /**
      * Registers a new user by capturing and storing their face embedding.
-     * This must be done FIRST before authentication can work.
+     * Uses the complete 5-step pipeline: Detection → Alignment → Feature Extraction → Storage → Liveness
      */
     public boolean registerUser(Mat faceImage) throws Exception {
         logger.info("=== REGISTRATION PROCESS STARTED ===");
-        logger.info("Step 1: Registering new user...");
+        logger.info("Step 1: Face Detection - Face already detected");
         
         if (faceImage == null || faceImage.empty()) {
             logger.error("Invalid face image provided for registration");
             return false;
         }
         
-        // Verify liveness if enabled (skip for first frame during registration)
+        // STEP 2: Face Alignment
+        logger.info("Step 2: Face Alignment - Aligning face for better recognition");
+        FaceAligner aligner = new FaceAligner();
+        Mat alignedFace = aligner.alignFaceSimple(faceImage);
+        if (alignedFace == null || alignedFace.empty()) {
+            alignedFace = faceImage; // Use original if alignment fails
+        }
+        
+        // STEP 3: Feature Extraction (Embeddings)
+        logger.info("Step 3: Feature Extraction - Extracting face embedding...");
+        double[] embedding = embeddingExtractor.extractEmbedding(alignedFace);
+        if (embedding == null || embedding.length == 0) {
+            logger.error("Failed to extract face embedding");
+            if (alignedFace != faceImage) alignedFace.release();
+            return false;
+        }
+        logger.info("Face embedding extracted successfully. Dimensions: {}", embedding.length);
+        
+        // Cleanup aligned face
+        if (alignedFace != faceImage) alignedFace.release();
+        
+        // STEP 4: Storage (done below)
+        
+        // STEP 5: Liveness Check
         if (livenessDetector != null) {
             try {
-                if (!livenessDetector.verifyLiveness(faceImage)) {
-                    logger.warn("Liveness detection failed during registration - skipping for now");
+                boolean isLive = livenessDetector.verifyLiveness(faceImage);
+                if (!isLive) {
+                    logger.warn("Liveness detection failed during registration - but continuing");
                     // Don't fail registration due to liveness - allow it for first registration
-                    // return false;
+                } else {
+                    logger.info("Step 5: Liveness Check - PASSED");
                 }
             } catch (Exception e) {
                 logger.warn("Liveness detection error during registration - continuing anyway", e);
             }
         }
-        
-        // Extract face embedding
-        logger.info("Step 2: Extracting face embedding...");
-        double[] embedding = embeddingExtractor.extractEmbedding(faceImage);
-        if (embedding == null || embedding.length == 0) {
-            logger.error("Failed to extract face embedding");
-            return false;
-        }
-        logger.info("Face embedding extracted successfully. Dimensions: {}", embedding.length);
         
         // Encrypt and store embedding
         logger.info("Step 3: Encrypting and storing face embedding...");
@@ -240,7 +257,7 @@ public class FaceRecognitionService {
     
     /**
      * Registers a user with multiple face angles (360-degree style).
-     * Saves all face images to the Image Data folder.
+     * Saves all face images AND creates embeddings for accurate recognition.
      */
     public boolean registerUserMultiAngle(List<Mat> faceImages) throws Exception {
         logger.info("=== MULTI-ANGLE REGISTRATION PROCESS STARTED ===");
@@ -251,13 +268,59 @@ public class FaceRecognitionService {
             return false;
         }
         
-        // Create Image Data directory
+        // STEP 1: Face Alignment
+        FaceAligner aligner = new FaceAligner();
+        
+        // STEP 2 & 3: Extract embeddings from all angles and average them
+        List<double[]> allEmbeddings = new java.util.ArrayList<>();
+        
+        for (int i = 0; i < faceImages.size(); i++) {
+            Mat faceImage = faceImages.get(i);
+            if (faceImage == null || faceImage.empty()) {
+                logger.warn("Skipping empty face image at index {}", i);
+                continue;
+            }
+            
+            // Align face
+            Mat alignedFace = aligner.alignFaceSimple(faceImage);
+            if (alignedFace == null) alignedFace = faceImage;
+            
+            // Extract embedding
+            double[] embedding = embeddingExtractor.extractEmbedding(alignedFace);
+            if (embedding != null && embedding.length > 0) {
+                allEmbeddings.add(embedding);
+                logger.debug("Extracted embedding {}: {} dimensions", i + 1, embedding.length);
+            }
+            
+            if (alignedFace != faceImage) alignedFace.release();
+        }
+        
+        if (allEmbeddings.isEmpty()) {
+            logger.error("Failed to extract embeddings from any face image");
+            return false;
+        }
+        
+        // Average all embeddings for better accuracy
+        double[] averagedEmbedding = averageEmbeddings(allEmbeddings);
+        logger.info("Averaged {} embeddings into single embedding ({} dimensions)", 
+                   allEmbeddings.size(), averagedEmbedding.length);
+        
+        // STEP 4: Store embedding (encrypted)
+        String dataDir = configManager.getConfig().getDataDirectory();
+        Files.createDirectories(Paths.get(dataDir));
+        
+        byte[] embeddingBytes = convertToBytes(averagedEmbedding);
+        byte[] encryptedData = encryptionService.encrypt(embeddingBytes);
+        Files.write(Paths.get(dataDir, EMBEDDING_FILE), encryptedData);
+        logger.info("Stored averaged embedding at: {}/{}", dataDir, EMBEDDING_FILE);
+        
+        // Also save face images for reference
         String imageDataPath = getImageDataPath();
         File imageDataDir = new File(imageDataPath);
         Files.createDirectories(Paths.get(imageDataPath));
         logger.info("Image Data directory: {}", imageDataPath);
         
-        // Clear existing images in the directory
+        // Clear existing images
         File[] existingFiles = imageDataDir.listFiles((d, name) -> 
             name.toLowerCase().endsWith(".jpg") || 
             name.toLowerCase().endsWith(".jpeg") || 
@@ -265,7 +328,6 @@ public class FaceRecognitionService {
         if (existingFiles != null) {
             for (File file : existingFiles) {
                 file.delete();
-                logger.debug("Deleted existing image: {}", file.getName());
             }
         }
         
@@ -274,7 +336,6 @@ public class FaceRecognitionService {
         for (int i = 0; i < faceImages.size(); i++) {
             Mat faceImage = faceImages.get(i);
             if (faceImage == null || faceImage.empty()) {
-                logger.warn("Skipping empty face image at index {}", i);
                 continue;
             }
             
@@ -285,28 +346,50 @@ public class FaceRecognitionService {
             if (saved) {
                 savedCount++;
                 logger.info("Saved face image {}: {}", i + 1, imagePath);
-                
-                // Verify file was created
-                File savedFile = new File(imagePath);
-                if (savedFile.exists()) {
-                    logger.debug("Verified: Image file exists. Size: {} bytes", savedFile.length());
-                } else {
-                    logger.warn("Warning: Image file was not created at: {}", imagePath);
-                }
-            } else {
-                logger.error("Failed to save face image {} to: {}", i + 1, imagePath);
             }
         }
         
-        if (savedCount == 0) {
-            logger.error("Failed to save any face images");
-            return false;
-        }
-        
         logger.info("=== MULTI-ANGLE REGISTRATION COMPLETE ===");
-        logger.info("Saved {}/{} face images to: {}", savedCount, faceImages.size(), imageDataPath);
+        logger.info("Saved {}/{} face images and averaged embedding", savedCount, faceImages.size());
         logger.info("User registered successfully with {} face angles.", savedCount);
         return true;
+    }
+    
+    /**
+     * Averages multiple embeddings to create a more robust representation.
+     */
+    private double[] averageEmbeddings(List<double[]> embeddings) {
+        if (embeddings.isEmpty()) {
+            return null;
+        }
+        
+        int dim = embeddings.get(0).length;
+        double[] averaged = new double[dim];
+        
+        for (double[] emb : embeddings) {
+            for (int i = 0; i < dim && i < emb.length; i++) {
+                averaged[i] += emb[i];
+            }
+        }
+        
+        // Normalize by count
+        for (int i = 0; i < dim; i++) {
+            averaged[i] /= embeddings.size();
+        }
+        
+        // L2 normalize
+        double norm = 0.0;
+        for (double v : averaged) {
+            norm += v * v;
+        }
+        norm = Math.sqrt(norm);
+        if (norm > 0.0) {
+            for (int i = 0; i < dim; i++) {
+                averaged[i] /= norm;
+            }
+        }
+        
+        return averaged;
     }
     
     /**
@@ -341,11 +424,55 @@ public class FaceRecognitionService {
             }
         }
         
-        // Try image-based authentication first (new method)
+        // STEP 1: Face Detection (already done - faceImage is provided)
+        logger.debug("Step 1: Face Detection - Face already detected");
+        
+        // STEP 2: Face Alignment
+        logger.debug("Step 2: Face Alignment - Aligning face for better recognition");
+        FaceAligner aligner = new FaceAligner();
+        Mat alignedFace = aligner.alignFaceSimple(faceImage);
+        if (alignedFace == null || alignedFace.empty()) {
+            alignedFace = faceImage; // Use original if alignment fails
+        }
+        
+        // STEP 3: Feature Extraction (Embeddings) - PRIMARY METHOD
+        logger.debug("Step 3: Feature Extraction - Extracting face embeddings");
+        double[] currentEmbedding = embeddingExtractor.extractEmbedding(alignedFace);
+        if (currentEmbedding == null || currentEmbedding.length == 0) {
+            logger.error("Failed to extract face embedding - cannot authenticate");
+            if (alignedFace != faceImage) alignedFace.release();
+            return 0.0;
+        }
+        logger.debug("Current embedding extracted. Dimensions: {}", currentEmbedding.length);
+        
+        // STEP 4: Comparison with stored embeddings
+        logger.debug("Step 4: Comparison - Comparing embeddings");
+        
+        // Try to load stored embeddings from registration
+        String dataDir = configManager.getConfig().getDataDirectory();
+        File embeddingFile = new File(dataDir, EMBEDDING_FILE);
+        
+        double bestSimilarity = 0.0;
+        
+        if (embeddingFile.exists()) {
+            // Use embedding-based comparison (most accurate)
+            try {
+                byte[] encryptedData = Files.readAllBytes(Paths.get(dataDir, EMBEDDING_FILE));
+                byte[] decryptedData = encryptionService.decrypt(encryptedData);
+                double[] storedEmbedding = convertFromBytes(decryptedData);
+                
+                if (storedEmbedding.length == currentEmbedding.length) {
+                    bestSimilarity = calculateCosineSimilarity(storedEmbedding, currentEmbedding);
+                    logger.debug("Embedding-based similarity: {}", bestSimilarity);
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to load stored embedding, trying image-based fallback", e);
+            }
+        }
+        
+        // Fallback: Compare with registered images using embeddings
         String imageDataPath = getImageDataPath();
         File imageDataDir = new File(imageDataPath);
-        logger.info("Checking Image Data folder: {}", imageDataPath);
-        logger.info("Directory exists: {}, Is directory: {}", imageDataDir.exists(), imageDataDir.isDirectory());
         
         if (imageDataDir.exists() && imageDataDir.isDirectory()) {
             File[] imageFiles = imageDataDir.listFiles((d, name) -> 
@@ -353,84 +480,58 @@ public class FaceRecognitionService {
                 name.toLowerCase().endsWith(".jpeg") || 
                 name.toLowerCase().endsWith(".png"));
             
-            logger.info("Found {} image files in Image Data folder", imageFiles != null ? imageFiles.length : 0);
-            
             if (imageFiles != null && imageFiles.length > 0) {
-                logger.info("Using image-based authentication with {} reference images", imageFiles.length);
+                logger.debug("Comparing with {} registered images using embeddings", imageFiles.length);
                 
-                try {
-                    // Load reference images
-                    List<Mat> referenceImages = imageComparisonService.loadReferenceImages(imageDataPath);
-                    logger.info("Loaded {} reference images for comparison", referenceImages.size());
-                    
-                    if (referenceImages.isEmpty()) {
-                        logger.error("Failed to load any reference images from: {}", imageDataPath);
-                    } else {
-                        // Compare current face with all reference images
-                        logger.info("Starting image comparison...");
-                        double similarity = imageComparisonService.compareWithImages(faceImage, referenceImages);
-                        
-                        // Cleanup reference images
-                        for (Mat img : referenceImages) {
-                            if (img != null) {
-                                img.release();
+                for (File imgFile : imageFiles) {
+                    try {
+                        Mat refImage = Imgcodecs.imread(imgFile.getAbsolutePath());
+                        if (refImage != null && !refImage.empty()) {
+                            // Align reference image
+                            Mat alignedRef = aligner.alignFaceSimple(refImage);
+                            if (alignedRef == null) alignedRef = refImage;
+                            
+                            // Extract embedding from reference
+                            double[] refEmbedding = embeddingExtractor.extractEmbedding(alignedRef);
+                            if (refEmbedding != null && refEmbedding.length == currentEmbedding.length) {
+                                double similarity = calculateCosineSimilarity(currentEmbedding, refEmbedding);
+                                bestSimilarity = Math.max(bestSimilarity, similarity);
+                                logger.debug("Similarity with {}: {}", imgFile.getName(), similarity);
                             }
+                            
+                            if (alignedRef != refImage) alignedRef.release();
+                            refImage.release();
                         }
-                        
-                        logger.info("=== AUTHENTICATION RESULT (Image-based) ===");
-                        logger.info("Face similarity score: {} (1.0 = perfect match, 0.0 = no match)", similarity);
-                        logger.info("Threshold: {}", configManager.getConfig().getFaceRecognitionThreshold());
-                        logger.info("Match: {}", similarity >= configManager.getConfig().getFaceRecognitionThreshold() ? "YES" : "NO");
-                        
-                        return similarity;
+                    } catch (Exception e) {
+                        logger.debug("Error processing reference image {}", imgFile.getName(), e);
                     }
-                } catch (Exception e) {
-                    logger.error("Error during image-based authentication", e);
-                    // Continue to fallback
                 }
-            } else {
-                logger.warn("Image Data folder exists but contains no image files");
             }
-        } else {
-            logger.warn("Image Data folder does not exist or is not a directory: {}", imageDataPath);
         }
         
-        // Fallback to embedding-based authentication (old method)
-        logger.debug("Falling back to embedding-based authentication...");
-        String dataDir = configManager.getConfig().getDataDirectory();
-        File embeddingFile = new File(dataDir, EMBEDDING_FILE);
+        // Cleanup
+        if (alignedFace != faceImage) alignedFace.release();
         
-        if (!embeddingFile.exists()) {
-            logger.error("No embedding file found and no images found. Registration may be incomplete.");
-            return 0.0;
+        // STEP 5: Liveness Check (already done above, but log result)
+        boolean livenessPassed = true;
+        if (livenessDetector != null) {
+            livenessPassed = livenessDetector.verifyLiveness(faceImage);
+            logger.debug("Step 5: Liveness Check - {}", livenessPassed ? "PASSED" : "FAILED");
+            
+            // Liveness failure reduces confidence but doesn't block
+            if (!livenessPassed) {
+                bestSimilarity = bestSimilarity * 0.9; // Reduce by 10%
+                logger.warn("Liveness check failed - reducing similarity score");
+            }
         }
-        
-        // Load stored embedding (from registration)
-        logger.debug("Step 1: Loading registered face embedding...");
-        byte[] encryptedData = Files.readAllBytes(Paths.get(dataDir, EMBEDDING_FILE));
-        byte[] decryptedData = encryptionService.decrypt(encryptedData);
-        double[] storedEmbedding = convertFromBytes(decryptedData);
-        logger.debug("Registered embedding loaded. Dimensions: {}", storedEmbedding.length);
-        
-        // Extract current face embedding (from camera)
-        logger.debug("Step 2: Extracting current face embedding...");
-        double[] currentEmbedding = embeddingExtractor.extractEmbedding(faceImage);
-        if (currentEmbedding == null || currentEmbedding.length == 0) {
-            logger.error("Failed to extract face embedding from current image");
-            return 0.0;
-        }
-        logger.debug("Current embedding extracted. Dimensions: {}", currentEmbedding.length);
-        
-        // Compare embeddings (registered vs current)
-        logger.debug("Step 3: Comparing registered face with current face...");
-        double similarity = calculateCosineSimilarity(storedEmbedding, currentEmbedding);
         
         logger.info("=== AUTHENTICATION RESULT (Embedding-based) ===");
-        logger.info("Face similarity score: {} (1.0 = perfect match, 0.0 = no match)", similarity);
+        logger.info("Face similarity score: {} (1.0 = perfect match, 0.0 = no match)", bestSimilarity);
         logger.info("Threshold: {}", configManager.getConfig().getFaceRecognitionThreshold());
-        logger.info("Match: {}", similarity >= configManager.getConfig().getFaceRecognitionThreshold() ? "YES" : "NO");
+        logger.info("Liveness: {}", livenessPassed ? "PASSED" : "FAILED");
+        logger.info("Match: {}", bestSimilarity >= configManager.getConfig().getFaceRecognitionThreshold() ? "YES" : "NO");
         
-        return similarity;
+        return bestSimilarity;
     }
     
     /**

@@ -1,0 +1,105 @@
+========================================
+QUICK MODEL SETUP GUIDE
+========================================
+
+MODEL DIRECTORY LOCATION:
+  ~/.secureview/models/
+  Full path: /home/aryan-budukh/.secureview/models/
+
+STATUS: ✅ Directory created and ready
+
+========================================
+REQUIRED MODELS
+========================================
+
+1. RETINAFACE (Face Detection)
+   File: retinaface.onnx
+   Size: ~1.7 MB
+   Location: ~/.secureview/models/retinaface.onnx
+
+2. ARCFACE/SFACE (Face Recognition)
+   File: arcface.onnx
+   Size: ~10-100 MB
+   Location: ~/.secureview/models/arcface.onnx
+
+========================================
+HOW TO DOWNLOAD (MANUAL)
+========================================
+
+Since automatic downloads are failing, download manually:
+
+STEP 1: Download RetinaFace
+----------------------------
+1. Go to: https://github.com/opencv/opencv_zoo
+2. Click on: models/face_detection_retinaface/
+3. Find file: face_detection_retinaface_2023mar.onnx
+4. Click "Download" or "Raw"
+5. Save to: ~/.secureview/models/retinaface.onnx
+
+OR use wget with correct URL (if you find it):
+  cd ~/.secureview/models
+  wget <correct-url> -O retinaface.onnx
+
+STEP 2: Download SFace/ArcFace
+-------------------------------
+1. Go to: https://github.com/opencv/opencv_zoo
+2. Click on: models/face_recognition_sface/
+3. Find file: face_recognition_sface_2021dec.onnx
+4. Click "Download" or "Raw"
+5. Save to: ~/.secureview/models/arcface.onnx
+
+OR use wget with correct URL (if you find it):
+  cd ~/.secureview/models
+  wget <correct-url> -O arcface.onnx
+
+========================================
+VERIFY INSTALLATION
+========================================
+
+After downloading, check:
+  ls -lh ~/.secureview/models/
+
+Should show:
+  -rw-rw-r-- 1 user user 1.7M ... retinaface.onnx
+  -rw-rw-r-- 1 user user  45M ... arcface.onnx
+
+If files are 0 bytes or missing, download again!
+
+========================================
+ALTERNATIVE SOURCES
+========================================
+
+If OpenCV Zoo doesn't work, try:
+
+1. Hugging Face:
+   https://huggingface.co/models?search=retinaface
+   https://huggingface.co/models?search=arcface
+
+2. ONNX Model Zoo:
+   https://github.com/onnx/models
+
+3. InsightFace Releases:
+   https://github.com/deepinsight/insightface/releases
+
+========================================
+IMPORTANT NOTES
+========================================
+
+- Files MUST be > 1MB (empty files are ignored)
+- Files MUST be named exactly: retinaface.onnx and arcface.onnx
+- After downloading, RESTART the application
+- The system will automatically detect and use models if they're valid
+
+========================================
+CURRENT STATUS
+========================================
+
+Run this to check:
+  ls -lh ~/.secureview/models/
+
+If empty, you need to download models manually.
+
+========================================
+
+
+

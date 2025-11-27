@@ -45,11 +45,11 @@ public class ConfigManager {
                 config = gson.fromJson(reader, ApplicationConfig.class);
                 logger.info("Configuration loaded from: {}", CONFIG_FILE);
                 
-                // Upgrade old configs with low thresholds to stricter defaults
-                if (config.getFaceRecognitionThreshold() < 0.7) {
-                    logger.info("Upgrading face recognition threshold from {} to 0.75 for better security", 
+                // Upgrade old configs with very low thresholds
+                if (config.getFaceRecognitionThreshold() < 0.5) {
+                    logger.info("Upgrading face recognition threshold from {} to 0.65", 
                                config.getFaceRecognitionThreshold());
-                    config.setFaceRecognitionThreshold(0.75);
+                    config.setFaceRecognitionThreshold(0.65);
                     saveConfiguration();
                 }
                 
@@ -84,7 +84,7 @@ public class ConfigManager {
     
     private void createDefaultConfig() {
         config = new ApplicationConfig();
-        config.setFaceRecognitionThreshold(0.75); // Stricter threshold to prevent false acceptances
+        config.setFaceRecognitionThreshold(0.65); // Lower threshold for simplified embeddings to work
         config.setLivenessDetectionEnabled(true);
         config.setMaxFailedAttempts(15); // 15 attempts before sending alert email
         config.setLockoutDuration(300000); // 5 minutes

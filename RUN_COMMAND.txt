@@ -1,0 +1,33 @@
+==========================================
+SECUREVIEW - RUN COMMANDS
+==========================================
+
+QUICK RUN (Recommended):
+------------------------
+cd /home/aryan-budukh/Desktop/SecureVIew/SecureView
+./run-secureview.sh
+
+
+DIRECT RUN (Alternative):
+-------------------------
+cd /home/aryan-budukh/Desktop/SecureVIew/SecureView/SecureView/desktop-app
+export LD_LIBRARY_PATH="/usr/lib/jni:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+/usr/lib/jvm/java-21-openjdk-amd64/bin/java -Djava.library.path="$LD_LIBRARY_PATH" -cp "target/secureview-desktop-1.0.0.jar:/usr/share/java/opencv-460.jar" com.secureview.desktop.SecureViewApplication
+
+
+ONE-LINE COMMAND:
+-----------------
+cd /home/aryan-budukh/Desktop/SecureVIew/SecureView && ./run-secureview.sh
+
+
+IF JAVA 21 NOT INSTALLED:
+-------------------------
+First install Java 21:
+sudo apt update && sudo apt install -y openjdk-21-jdk && sudo update-alternatives --set java /usr/lib/jvm/java-21-openjdk-amd64/bin/java
+
+Then run:
+cd /home/aryan-budukh/Desktop/SecureVIew/SecureView && ./run-secureview.sh
+
+
+==========================================
+

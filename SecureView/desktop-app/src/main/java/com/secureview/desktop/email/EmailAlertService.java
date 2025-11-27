@@ -11,6 +11,7 @@ import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,33 +53,48 @@ public class EmailAlertService {
      * Falls back to config.getAlertEmailTo() if CSV is missing or empty.
      */
     private String getRecipientEmail() {
-        String csvPath = "T:\\\\COLLEGE LIFE\\\\projects\\\\SecureView\\\\SecureView\\\\desktop-app\\\\Email Alert Data.csv";
-        try {
-            Path path = Paths.get(csvPath);
-            if (Files.exists(path)) {
-                List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
-                // Find last non-header, non-empty line
-                for (int i = lines.size() - 1; i >= 0; i--) {
-                    String line = lines.get(i).trim();
-                    if (line.isEmpty() || line.startsWith("timestamp")) {
-                        continue;
-                    }
-                    String[] parts = line.split(",", 2);
-                    if (parts.length == 2) {
-                        String email = parts[1].trim();
-                        if (!email.isEmpty()) {
-                            return email;
+        // Try multiple possible CSV locations
+        String[] possiblePaths = {
+            System.getProperty("user.home") + File.separator + ".secureview" + File.separator + "Email Alert Data.csv",
+            System.getProperty("user.dir") + File.separator + "Email Alert Data.csv",
+            "Email Alert Data.csv"
+        };
+        
+        for (String csvPath : possiblePaths) {
+            try {
+                Path path = Paths.get(csvPath);
+                if (Files.exists(path)) {
+                    List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+                    // Find last non-header, non-empty line
+                    for (int i = lines.size() - 1; i >= 0; i--) {
+                        String line = lines.get(i).trim();
+                        if (line.isEmpty() || line.startsWith("timestamp") || line.startsWith("Timestamp")) {
+                            continue;
+                        }
+                        String[] parts = line.split(",", 2);
+                        if (parts.length == 2) {
+                            String email = parts[1].trim();
+                            if (!email.isEmpty() && email.contains("@")) {
+                                logger.info("Found alert email in CSV: {}", email);
+                                return email;
+                            }
                         }
                     }
                 }
+            } catch (Exception e) {
+                logger.debug("Failed to read alert email from CSV at: {}", csvPath, e);
             }
-        } catch (Exception e) {
-            logger.warn("Failed to read alert email from CSV", e);
         }
 
         // Fallback to config value
         String cfgEmail = configManager.getConfig().getAlertEmailTo();
-        return (cfgEmail != null && !cfgEmail.isEmpty()) ? cfgEmail : null;
+        if (cfgEmail != null && !cfgEmail.isEmpty() && cfgEmail.contains("@")) {
+            logger.info("Using alert email from config: {}", cfgEmail);
+            return cfgEmail;
+        }
+        
+        logger.warn("No valid alert recipient email found in CSV or config");
+        return null;
     }
 
     /**

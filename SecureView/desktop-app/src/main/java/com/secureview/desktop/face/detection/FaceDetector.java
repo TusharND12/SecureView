@@ -10,31 +10,56 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 
 /**
- * Handles face detection using OpenCV's Haar Cascade classifier.
+ * Handles face detection using RetinaFace (preferred) or Haar Cascade (fallback).
+ * RetinaFace provides state-of-the-art accuracy for face detection.
  */
 public class FaceDetector {
     private static final Logger logger = LoggerFactory.getLogger(FaceDetector.class);
     
     private CascadeClassifier faceCascade;
+    private RetinaFaceDetector retinaFaceDetector;
+    private boolean useRetinaFace = false;
     private static final String CASCADE_FILE = "haarcascade_frontalface_alt.xml";
     
     public void initialize() throws Exception {
         logger.info("Initializing Face Detector...");
         
-        // Load cascade classifier (stub will use real OpenCV if available)
+        // Try to initialize RetinaFace first (better accuracy)
+        String retinaFaceModelPath = System.getProperty("user.home") + "/.secureview/models/retinaface.onnx";
+        File retinaFaceModel = new File(retinaFaceModelPath);
+        
+        // Check if file exists AND is not empty (at least 1MB for ONNX models)
+        if (retinaFaceModel.exists() && retinaFaceModel.isFile() && retinaFaceModel.length() > 1024 * 1024) {
+            try {
+                logger.info("RetinaFace model found. Initializing RetinaFace detector...");
+                retinaFaceDetector = new RetinaFaceDetector();
+                retinaFaceDetector.initialize();
+                useRetinaFace = true;
+                logger.info("Face Detector initialized with RetinaFace (high accuracy)");
+                return;
+            } catch (Exception e) {
+                logger.warn("RetinaFace initialization failed, falling back to Haar Cascade: {}", e.getMessage());
+            }
+        } else {
+            if (retinaFaceModel.exists() && retinaFaceModel.length() == 0) {
+                logger.warn("RetinaFace model file exists but is EMPTY (0 bytes) at: {}. Using Haar Cascade.", retinaFaceModelPath);
+                logger.warn("Please delete the empty file and download a valid model.");
+            } else {
+                logger.info("RetinaFace model not found at: {}. Using Haar Cascade.", retinaFaceModelPath);
+            }
+            logger.info("For better accuracy, download RetinaFace model to: ~/.secureview/models/retinaface.onnx");
+            logger.info("Expected file size: ~1.7 MB. See MODEL_INSTALLATION_GUIDE.md for download instructions.");
+        }
+        
+        // Fallback to Haar Cascade
         faceCascade = new CascadeClassifier();
-        
-        // Try to load from resources or use default OpenCV path
         String cascadePath = loadCascadeFile();
-        
-        // Normalize path for OpenCV (use forward slashes or absolute path)
         String normalizedPath = new File(cascadePath).getAbsolutePath().replace("\\", "/");
         
         logger.info("Attempting to load cascade from: {}", normalizedPath);
         boolean loaded = faceCascade.load(normalizedPath);
         
         if (!loaded) {
-            // Try with backslashes (Windows)
             normalizedPath = new File(cascadePath).getAbsolutePath();
             logger.info("Retrying with Windows path format: {}", normalizedPath);
             loaded = faceCascade.load(normalizedPath);
@@ -49,11 +74,12 @@ public class FaceDetector {
                 "3. OpenCV is properly installed");
         }
         
-        logger.info("Face Detector initialized successfully with cascade: {}", cascadePath);
+        logger.info("Face Detector initialized successfully with Haar Cascade: {}", cascadePath);
     }
     
     /**
      * Detects face in the given image.
+     * Uses RetinaFace if available, otherwise falls back to Haar Cascade.
      * @param image Input image
      * @return Cropped face region, or null if no face detected
      */
@@ -65,6 +91,20 @@ public class FaceDetector {
         
         logger.debug("Starting face detection on image: {}x{}", image.cols(), image.rows());
         
+        // Use RetinaFace if available
+        if (useRetinaFace && retinaFaceDetector != null) {
+            try {
+                Mat face = retinaFaceDetector.detectFace(image);
+                if (face != null && !face.empty()) {
+                    logger.debug("Face detected using RetinaFace");
+                    return face;
+                }
+            } catch (Exception e) {
+                logger.warn("RetinaFace detection failed, falling back to Haar Cascade: {}", e.getMessage());
+            }
+        }
+        
+        // Fallback to Haar Cascade
         Mat gray = new Mat();
         Imgproc.cvtColor(image, gray, Imgproc.COLOR_BGR2GRAY);
         Imgproc.equalizeHist(gray, gray);
@@ -127,6 +167,14 @@ public class FaceDetector {
      * Checks if a face is detected in the image.
      */
     public boolean hasFace(Mat image) {
+        if (useRetinaFace && retinaFaceDetector != null) {
+            try {
+                return retinaFaceDetector.hasFace(image);
+            } catch (Exception e) {
+                logger.debug("RetinaFace hasFace check failed", e);
+            }
+        }
+        
         Mat face = detectFace(image);
         if (face != null) {
             face.release();
@@ -135,39 +183,87 @@ public class FaceDetector {
         return false;
     }
     
+    /**
+     * Returns true if using RetinaFace, false if using Haar Cascade.
+     */
+    public boolean isUsingRetinaFace() {
+        return useRetinaFace;
+    }
+    
     private String loadCascadeFile() throws Exception {
+        // Detect OS
+        String osName = System.getProperty("os.name").toLowerCase();
+        boolean isWindows = osName.contains("win");
+        boolean isLinux = osName.contains("linux") || osName.contains("unix");
+        
         // Try to find cascade file in common locations
         String opencvDir = System.getenv("OPENCV_DIR");
         if (opencvDir == null || opencvDir.isEmpty()) {
-            // Try common OpenCV installation paths
-            String[] commonPaths = {
-                "C:\\Users\\TUSHAR\\Downloads\\opencv",
-                "C:\\opencv",
-                "C:\\opencv4120",
-                System.getProperty("user.home") + "\\Downloads\\opencv"
-            };
-            for (String path : commonPaths) {
-                File testDir = new File(path);
-                if (testDir.exists() && testDir.isDirectory()) {
-                    opencvDir = path;
-                    break;
+            if (isLinux) {
+                // Linux common paths
+                String[] linuxPaths = {
+                    "/usr",
+                    "/usr/local",
+                    System.getProperty("user.home") + "/opencv"
+                };
+                for (String path : linuxPaths) {
+                    File testDir = new File(path);
+                    if (testDir.exists() && testDir.isDirectory()) {
+                        opencvDir = path;
+                        break;
+                    }
+                }
+            } else {
+                // Windows common paths
+                String[] commonPaths = {
+                    "C:\\Users\\TUSHAR\\Downloads\\opencv",
+                    "C:\\opencv",
+                    "C:\\opencv4120",
+                    System.getProperty("user.home") + "\\Downloads\\opencv"
+                };
+                for (String path : commonPaths) {
+                    File testDir = new File(path);
+                    if (testDir.exists() && testDir.isDirectory()) {
+                        opencvDir = path;
+                        break;
+                    }
                 }
             }
         }
         
-        String[] possiblePaths = {
-            // OpenCV installation directory (most common)
-            opencvDir != null ? opencvDir + File.separator + "build" + File.separator + "etc" + File.separator + "haarcascades" + File.separator + CASCADE_FILE : null,
-            opencvDir != null ? opencvDir + File.separator + "data" + File.separator + "haarcascades" + File.separator + CASCADE_FILE : null,
-            // Alternative OpenCV paths
-            "C:\\Users\\TUSHAR\\Downloads\\opencv\\build\\etc\\haarcascades\\" + CASCADE_FILE,
-            "C:\\opencv\\build\\etc\\haarcascades\\" + CASCADE_FILE,
-            "C:\\opencv\\data\\haarcascades\\" + CASCADE_FILE,
-            // Current directory and resources
-            System.getProperty("user.dir") + File.separator + CASCADE_FILE,
-            System.getProperty("opencv.data.dir", "") + File.separator + CASCADE_FILE,
-            "resources" + File.separator + CASCADE_FILE
-        };
+        // Build list of possible paths based on OS
+        java.util.List<String> possiblePathsList = new java.util.ArrayList<>();
+        
+        if (isLinux) {
+            // Linux system paths (check these first)
+            possiblePathsList.add("/usr/share/opencv4/haarcascades/" + CASCADE_FILE);
+            possiblePathsList.add("/usr/share/opencv4/haarcascades/haarcascade_frontalface_alt.xml");
+            possiblePathsList.add("/usr/local/share/opencv4/haarcascades/" + CASCADE_FILE);
+            possiblePathsList.add("/usr/share/opencv/haarcascades/" + CASCADE_FILE);
+            
+            // OpenCV installation directory paths
+            if (opencvDir != null) {
+                possiblePathsList.add(opencvDir + "/build/etc/haarcascades/" + CASCADE_FILE);
+                possiblePathsList.add(opencvDir + "/data/haarcascades/" + CASCADE_FILE);
+                possiblePathsList.add(opencvDir + "/share/opencv4/haarcascades/" + CASCADE_FILE);
+            }
+        } else {
+            // Windows paths
+            if (opencvDir != null) {
+                possiblePathsList.add(opencvDir + File.separator + "build" + File.separator + "etc" + File.separator + "haarcascades" + File.separator + CASCADE_FILE);
+                possiblePathsList.add(opencvDir + File.separator + "data" + File.separator + "haarcascades" + File.separator + CASCADE_FILE);
+            }
+            possiblePathsList.add("C:\\Users\\TUSHAR\\Downloads\\opencv\\build\\etc\\haarcascades\\" + CASCADE_FILE);
+            possiblePathsList.add("C:\\opencv\\build\\etc\\haarcascades\\" + CASCADE_FILE);
+            possiblePathsList.add("C:\\opencv\\data\\haarcascades\\" + CASCADE_FILE);
+        }
+        
+        // Common paths for both OS
+        possiblePathsList.add(System.getProperty("user.dir") + File.separator + CASCADE_FILE);
+        possiblePathsList.add(System.getProperty("opencv.data.dir", "") + File.separator + CASCADE_FILE);
+        possiblePathsList.add("resources" + File.separator + CASCADE_FILE);
+        
+        String[] possiblePaths = possiblePathsList.toArray(new String[0]);
         
         for (String path : possiblePaths) {
             if (path == null) continue;

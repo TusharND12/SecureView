@@ -10,11 +10,13 @@ import com.secureview.desktop.opencv.stub.Mat;
 import com.secureview.desktop.opencv.stub.Imgcodecs;
 import com.secureview.desktop.opencv.stub.VideoCapture;
 import com.secureview.desktop.opencv.stub.Videoio;
+import com.secureview.desktop.ui.ModernTheme;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
@@ -40,7 +42,9 @@ public class AuthenticationWindow extends JFrame {
     private JLabel statusLabel;
     private JLabel userLabel;
     private JLabel confidenceLabel;
-    private JProgressBar progressBar;
+    private ModernTheme.AnimatedProgressBar progressBar;
+    private ModernTheme.StatusBadge statusBadge;
+    private JPanel cameraContainer;
     private VideoCapture camera;
     private Timer captureTimer;
     private AtomicBoolean isProcessing = new AtomicBoolean(false);
@@ -70,97 +74,129 @@ public class AuthenticationWindow extends JFrame {
     }
     
     private void initializeUI() {
-        setTitle("SecureView - Authentication");
+        setTitle("SecureView - Face Authentication");
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         setLayout(new BorderLayout());
-        setSize(900, 620);
+        setSize(1100, 720);
         setLocationRelativeTo(null);
         setResizable(false);
-        setAlwaysOnTop(true); // Keep window on top initially
-        setVisible(true); // Make sure it's visible
-        toFront(); // Bring to front
-        requestFocus(); // Request focus
+        setAlwaysOnTop(true);
+        getContentPane().setBackground(ModernTheme.PRIMARY_DARK);
         
-        // === HEADER BAR ===
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBackground(new Color(0x1f2933));
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+        // === MODERN HEADER WITH GRADIENT ===
+        JPanel headerPanel = new ModernTheme.RoundedPanel(0, ModernTheme.SECONDARY_DARK);
+        headerPanel.setLayout(new BorderLayout());
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(20, 30, 20, 30));
         
-        JLabel titleLabel = new JLabel("SecureView");
-        titleLabel.setForeground(Color.WHITE);
-        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
-        headerPanel.add(titleLabel, BorderLayout.WEST);
+        // Title with icon
+        JPanel titlePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        titlePanel.setOpaque(false);
+        JLabel titleLabel = new JLabel("🔒 SecureView");
+        titleLabel.setForeground(ModernTheme.TEXT_PRIMARY);
+        titleLabel.setFont(ModernTheme.getTitleFont());
+        titlePanel.add(titleLabel);
+        headerPanel.add(titlePanel, BorderLayout.WEST);
         
-        JLabel modeLabel = new JLabel("Authentication Mode");
-        modeLabel.setForeground(Color.LIGHT_GRAY);
-        modeLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        headerPanel.add(modeLabel, BorderLayout.EAST);
+        // Status badge
+        statusBadge = new ModernTheme.StatusBadge("● Ready", ModernTheme.TEXT_SECONDARY);
+        statusBadge.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
+        headerPanel.add(statusBadge, BorderLayout.EAST);
         
         add(headerPanel, BorderLayout.NORTH);
         
         // === MAIN CONTENT ===
         JPanel mainPanel = new JPanel(new BorderLayout());
-        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        mainPanel.setOpaque(false);
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         
-        // Left: camera panel
-        JPanel cameraPanel = new JPanel(new BorderLayout());
-        cameraPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(0xd1d5db)),
-            BorderFactory.createEmptyBorder(5, 5, 5, 5)
-        ));
+        // Left: Modern camera panel with rounded corners
+        cameraContainer = new ModernTheme.RoundedPanel(16, ModernTheme.SECONDARY_DARK);
+        cameraContainer.setLayout(new BorderLayout());
+        cameraContainer.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         
+        // Camera label with modern styling
         cameraLabel = new JLabel("Initializing camera...", JLabel.CENTER);
-        cameraLabel.setPreferredSize(new Dimension(640, 480));
-        cameraPanel.add(cameraLabel, BorderLayout.CENTER);
+        cameraLabel.setPreferredSize(new Dimension(720, 540));
+        cameraLabel.setForeground(ModernTheme.TEXT_SECONDARY);
+        cameraLabel.setFont(ModernTheme.getBodyFont());
+        cameraLabel.setVerticalAlignment(SwingConstants.CENTER);
+        cameraContainer.add(cameraLabel, BorderLayout.CENTER);
         
-        JLabel cameraCaption = new JLabel("Live camera", JLabel.LEFT);
-        cameraCaption.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        cameraCaption.setForeground(new Color(0x6b7280));
-        cameraPanel.add(cameraCaption, BorderLayout.NORTH);
+        // Camera caption
+        JLabel cameraCaption = new JLabel("📹 Live Camera Feed");
+        cameraCaption.setFont(ModernTheme.getHeadingFont());
+        cameraCaption.setForeground(ModernTheme.TEXT_PRIMARY);
+        cameraCaption.setBorder(BorderFactory.createEmptyBorder(0, 0, 12, 0));
+        cameraContainer.add(cameraCaption, BorderLayout.NORTH);
         
-        mainPanel.add(cameraPanel, BorderLayout.CENTER);
+        mainPanel.add(cameraContainer, BorderLayout.CENTER);
         
-        // Right: status & details panel
+        // Right: Modern status panel
         JPanel sidePanel = new JPanel();
         sidePanel.setLayout(new BoxLayout(sidePanel, BoxLayout.Y_AXIS));
-        sidePanel.setBorder(BorderFactory.createEmptyBorder(0, 15, 0, 0));
-        sidePanel.setPreferredSize(new Dimension(260, 0));
+        sidePanel.setOpaque(false);
+        sidePanel.setBorder(BorderFactory.createEmptyBorder(0, 20, 0, 0));
+        sidePanel.setPreferredSize(new Dimension(320, 0));
         
-        // User info
-        JPanel userPanel = new JPanel(new BorderLayout());
-        userPanel.setBorder(BorderFactory.createTitledBorder("User"));
-        userLabel = new JLabel("Current user: user", JLabel.LEFT);
-        userLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        userPanel.add(userLabel, BorderLayout.CENTER);
-        sidePanel.add(userPanel);
+        // Status card
+        ModernTheme.RoundedPanel statusCard = new ModernTheme.RoundedPanel(16, ModernTheme.CARD_BG);
+        statusCard.setLayout(new BorderLayout());
+        statusCard.setBorder(BorderFactory.createEmptyBorder(24, 24, 24, 24));
         
-        // Confidence info
-        JPanel confidencePanel = new JPanel(new BorderLayout());
-        confidencePanel.setBorder(BorderFactory.createTitledBorder("Confidence"));
-        confidenceLabel = new JLabel("Confidence: --%", JLabel.LEFT);
-        confidenceLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        confidencePanel.add(confidenceLabel, BorderLayout.CENTER);
-        sidePanel.add(Box.createVerticalStrut(8));
-        sidePanel.add(confidencePanel);
+        JLabel statusTitle = new JLabel("🔐 Authentication Status");
+        statusTitle.setFont(ModernTheme.getHeadingFont());
+        statusTitle.setForeground(ModernTheme.TEXT_PRIMARY);
+        statusTitle.setBorder(BorderFactory.createEmptyBorder(0, 0, 16, 0));
+        statusCard.add(statusTitle, BorderLayout.NORTH);
         
-        // Status text
-        JPanel statusPanel = new JPanel(new BorderLayout());
-        statusPanel.setBorder(BorderFactory.createTitledBorder("Status"));
-        statusLabel = new JLabel("Position your face in front of the camera", JLabel.CENTER);
-        statusLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
-        statusPanel.add(statusLabel, BorderLayout.CENTER);
+        statusLabel = new JLabel("<html><div style='text-align: center;'>Position your face<br>in front of the camera</div></html>");
+        statusLabel.setFont(ModernTheme.getBodyFont());
+        statusLabel.setForeground(ModernTheme.TEXT_SECONDARY);
+        statusLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 20, 0));
+        statusCard.add(statusLabel, BorderLayout.CENTER);
         
-        progressBar = new JProgressBar();
-        progressBar.setStringPainted(true);
+        progressBar = new ModernTheme.AnimatedProgressBar();
+        progressBar.setPreferredSize(new Dimension(0, 40));
         progressBar.setString("Ready");
-        statusPanel.add(progressBar, BorderLayout.SOUTH);
+        progressBar.setValue(0);
+        statusCard.add(progressBar, BorderLayout.SOUTH);
         
-        sidePanel.add(Box.createVerticalStrut(8));
-        sidePanel.add(statusPanel);
+        sidePanel.add(statusCard);
+        sidePanel.add(Box.createVerticalStrut(16));
+        
+        // Info cards
+        ModernTheme.RoundedPanel infoCard = new ModernTheme.RoundedPanel(16, ModernTheme.CARD_BG);
+        infoCard.setLayout(new BoxLayout(infoCard, BoxLayout.Y_AXIS));
+        infoCard.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        
+        JLabel infoTitle = new JLabel("📊 Recognition Details");
+        infoTitle.setFont(ModernTheme.getHeadingFont());
+        infoTitle.setForeground(ModernTheme.TEXT_PRIMARY);
+        infoTitle.setBorder(BorderFactory.createEmptyBorder(0, 0, 16, 0));
+        infoCard.add(infoTitle);
+        
+        userLabel = new JLabel("👤 User: Registered");
+        userLabel.setFont(ModernTheme.getBodyFont());
+        userLabel.setForeground(ModernTheme.TEXT_SECONDARY);
+        userLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 12, 0));
+        infoCard.add(userLabel);
+        
+        confidenceLabel = new JLabel("🎯 Confidence: --%");
+        confidenceLabel.setFont(ModernTheme.getBodyFont());
+        confidenceLabel.setForeground(ModernTheme.TEXT_SECONDARY);
+        infoCard.add(confidenceLabel);
+        
+        sidePanel.add(infoCard);
+        sidePanel.add(Box.createVerticalStrut(16));
         
         // Buttons
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        JButton reRegisterButton = new JButton("Re-register Face");
+        ModernTheme.RoundedPanel buttonCard = new ModernTheme.RoundedPanel(16, ModernTheme.CARD_BG);
+        buttonCard.setLayout(new BorderLayout());
+        buttonCard.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        
+        ModernTheme.ModernButton reRegisterButton = new ModernTheme.ModernButton("🔄 Re-register Face", false);
+        reRegisterButton.setPreferredSize(new Dimension(0, 45));
         reRegisterButton.setToolTipText("Clear existing registration and register a new face");
         reRegisterButton.addActionListener(e -> {
             int confirm = JOptionPane.showConfirmDialog(
@@ -197,28 +233,33 @@ public class AuthenticationWindow extends JFrame {
                 }
             }
         });
-        buttonPanel.add(reRegisterButton);
-        sidePanel.add(Box.createVerticalStrut(8));
-        sidePanel.add(buttonPanel);
+        buttonCard.add(reRegisterButton, BorderLayout.CENTER);
+        sidePanel.add(buttonCard);
         
         mainPanel.add(sidePanel, BorderLayout.EAST);
         
         add(mainPanel, BorderLayout.CENTER);
         
-        // === BOTTOM BAR ===
-        JPanel bottomPanel = new JPanel(new BorderLayout());
-        bottomPanel.setBorder(BorderFactory.createEmptyBorder(4, 10, 4, 10));
+        // === MODERN FOOTER ===
+        ModernTheme.RoundedPanel bottomPanel = new ModernTheme.RoundedPanel(0, ModernTheme.SECONDARY_DARK);
+        bottomPanel.setLayout(new BorderLayout());
+        bottomPanel.setBorder(BorderFactory.createEmptyBorder(12, 30, 12, 30));
         
-        JLabel attemptsLabel = new JLabel("Attempts: 0 failed", JLabel.LEFT);
-        attemptsLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        JLabel attemptsLabel = new JLabel("⚠️ Failed Attempts: 0");
+        attemptsLabel.setFont(ModernTheme.getSmallFont());
+        attemptsLabel.setForeground(ModernTheme.TEXT_SECONDARY);
         bottomPanel.add(attemptsLabel, BorderLayout.WEST);
         
-        JLabel versionLabel = new JLabel("SecureView Desktop", JLabel.RIGHT);
-        versionLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        versionLabel.setForeground(new Color(0x6b7280));
+        JLabel versionLabel = new JLabel("SecureView v1.0 • Powered by RetinaFace + ArcFace");
+        versionLabel.setFont(ModernTheme.getSmallFont());
+        versionLabel.setForeground(ModernTheme.TEXT_SECONDARY);
         bottomPanel.add(versionLabel, BorderLayout.EAST);
         
         add(bottomPanel, BorderLayout.SOUTH);
+        
+        setVisible(true);
+        toFront();
+        requestFocus();
         
         // Handle window close
         addWindowListener(new java.awt.event.WindowAdapter() {
@@ -242,9 +283,9 @@ public class AuthenticationWindow extends JFrame {
                 throw new Exception("Failed to open camera");
             }
             
-            // Set camera resolution
-            camera.set(Videoio.CAP_PROP_FRAME_WIDTH, 640);
-            camera.set(Videoio.CAP_PROP_FRAME_HEIGHT, 480);
+            // Set camera resolution for modern display
+            camera.set(Videoio.CAP_PROP_FRAME_WIDTH, 1280);
+            camera.set(Videoio.CAP_PROP_FRAME_HEIGHT, 720);
             
             // Start capture timer - reduced frequency for better performance
             captureTimer = new Timer(200, e -> captureAndProcess()); // 5 FPS for processing
@@ -274,8 +315,11 @@ public class AuthenticationWindow extends JFrame {
             long remainingSeconds = (configManager.getConfig().getLockoutDuration() - 
                 (currentTime - lastLockoutTime)) / 1000;
             SwingUtilities.invokeLater(() -> {
-                statusLabel.setText("System locked. Please wait " + remainingSeconds + " seconds.");
+                statusLabel.setText("<html><div style='text-align: center; color: #F59E0B;'><b>🔒 System Locked</b><br>Please wait " + remainingSeconds + " seconds</div></html>");
                 progressBar.setString("Locked");
+                progressBar.setValue(0);
+                statusBadge.setBadgeColor(ModernTheme.WARNING_ORANGE);
+                statusBadge.setText("● Locked");
             });
             return;
         }
@@ -320,8 +364,11 @@ public class AuthenticationWindow extends JFrame {
     private void displayFrame(Mat frame) {
         try {
             BufferedImage image = matToBufferedImage(frame);
-            ImageIcon icon = new ImageIcon(image.getScaledInstance(640, 480, Image.SCALE_SMOOTH));
+            // Scale to fit modern camera display
+            Image scaled = image.getScaledInstance(720, 540, Image.SCALE_SMOOTH);
+            ImageIcon icon = new ImageIcon(scaled);
             cameraLabel.setIcon(icon);
+            cameraLabel.setText(""); // Clear text when showing image
         } catch (Exception e) {
             logger.error("Error displaying frame", e);
         }
@@ -338,6 +385,11 @@ public class AuthenticationWindow extends JFrame {
         
         SwingUtilities.invokeLater(() -> {
             progressBar.setString("Processing...");
+            // Smooth animation to 50%
+            animateProgressBar(progressBar, 0, 50, 300);
+            progressBar.startAnimation();
+            statusBadge.setBadgeColor(ModernTheme.WARNING_ORANGE);
+            statusBadge.setText("● Processing");
         });
         
         new Thread(() -> {
@@ -347,8 +399,12 @@ public class AuthenticationWindow extends JFrame {
                 
                 if (face == null || face.empty()) {
                     SwingUtilities.invokeLater(() -> {
-                        statusLabel.setText("No face detected. Please position your face in front of the camera.");
+                        statusLabel.setText("<html><div style='text-align: center; color: #94A3B8;'>👤 No face detected<br>Please position your face in front of the camera</div></html>");
                         progressBar.setString("No face detected");
+                        progressBar.setValue(0);
+                        progressBar.stopAnimation();
+                        statusBadge.setBadgeColor(ModernTheme.TEXT_SECONDARY);
+                        statusBadge.setText("● Waiting");
                     });
                     isProcessing.set(false);
                     frame.release();
@@ -356,7 +412,8 @@ public class AuthenticationWindow extends JFrame {
                 }
                 
                 SwingUtilities.invokeLater(() -> {
-                    statusLabel.setText("Face detected. Authenticating...");
+                    statusLabel.setText("<html><div style='text-align: center; color: #3B82F6;'>✅ Face detected<br>Authenticating...</div></html>");
+                    animateProgressBar(progressBar, 50, 75, 200);
                 });
                 
                 // Authenticate
@@ -366,8 +423,8 @@ public class AuthenticationWindow extends JFrame {
                 final double finalSimilarity = similarity;
                 SwingUtilities.invokeLater(() -> {
                     int confidencePercent = (int) Math.round(finalSimilarity * 100.0);
-                    confidenceLabel.setText("Confidence: " + confidencePercent + "% (Threshold: " +
-                        (int) Math.round(threshold * 100.0) + "%)");
+                    int thresholdPercent = (int) Math.round(threshold * 100.0);
+                    confidenceLabel.setText("🎯 Confidence: " + confidencePercent + "% (Threshold: " + thresholdPercent + "%)");
                 });
                 
                 if (similarity >= threshold) {
@@ -384,8 +441,12 @@ public class AuthenticationWindow extends JFrame {
             } catch (Exception e) {
                 logger.error("Error during authentication", e);
                 SwingUtilities.invokeLater(() -> {
-                    statusLabel.setText("Error: " + e.getMessage());
+                    statusLabel.setText("<html><div style='text-align: center; color: #EF4444;'>⚠️ Error: " + e.getMessage() + "</div></html>");
                     progressBar.setString("Error");
+                    progressBar.setValue(0);
+                    progressBar.stopAnimation();
+                    statusBadge.setBadgeColor(ModernTheme.ERROR_RED);
+                    statusBadge.setText("● Error");
                 });
             } finally {
                 isProcessing.set(false);
@@ -394,15 +455,25 @@ public class AuthenticationWindow extends JFrame {
     }
     
     private void handleAuthenticationSuccess() {
+        // Load user name
+        String userName = loadUserName();
+        String greeting = userName != null && !userName.isEmpty() 
+            ? "Hi " + userName + "!" 
+            : "Welcome back!";
+        
         SwingUtilities.invokeLater(() -> {
-            statusLabel.setText("Authentication successful!");
-            progressBar.setString("Success");
-            progressBar.setValue(100);
+            statusLabel.setText("<html><div style='text-align: center; color: #10B981; font-size: 18px;'><b>✅ Authentication Successful!</b><br><br><span style='font-size: 20px;'>" + greeting + "</span></div></html>");
+            progressBar.setString("Success!");
+            // Smooth animation to 100%
+            animateProgressBar(progressBar, progressBar.getValue(), 100, 500);
+            progressBar.stopAnimation();
+            statusBadge.setBadgeColor(ModernTheme.SUCCESS_GREEN);
+            statusBadge.setText("● Authenticated");
             
             attemptLogger.logSuccess("user");
             failedAttempts.set(0);
             
-            // Close window after short delay (reduced from 1000ms to 500ms)
+            // Close window after short delay with success animation
             Timer closeTimer = new Timer((int)SUCCESS_DELAY, e -> {
                 dispose();
                 System.exit(0);
@@ -412,13 +483,60 @@ public class AuthenticationWindow extends JFrame {
         });
     }
     
+    /**
+     * Smoothly animates progress bar from current to target value.
+     */
+    private void animateProgressBar(ModernTheme.AnimatedProgressBar bar, int from, int to, int durationMs) {
+        if (from == to) return;
+        
+        int steps = 30;
+        int delay = durationMs / steps;
+        int diff = to - from;
+        
+        Timer animTimer = new Timer(delay, null);
+        final int[] step = {0};
+        
+        animTimer.addActionListener(e -> {
+            step[0]++;
+            if (step[0] > steps) {
+                animTimer.stop();
+                bar.setValue(to);
+            } else {
+                int current = from + (diff * step[0] / steps);
+                bar.setValue(current);
+            }
+        });
+        animTimer.start();
+    }
+    
+    /**
+     * Loads the user's name from storage.
+     */
+    private String loadUserName() {
+        try {
+            String dataDir = configManager.getConfig().getDataDirectory();
+            File nameFile = new File(dataDir, "user_name.txt");
+            if (nameFile.exists()) {
+                return new String(Files.readAllBytes(Paths.get(nameFile.getAbsolutePath()))).trim();
+            }
+        } catch (Exception e) {
+            logger.debug("Could not load user name", e);
+        }
+        return null;
+    }
+    
     private void handleAuthenticationFailure(Mat face, double similarity) {
         SwingUtilities.invokeLater(() -> {
             int attempts = failedAttempts.incrementAndGet();
-            statusLabel.setText("Authentication failed. Attempts: " + attempts);
-            progressBar.setString("Failed - Similarity: " + String.format("%.2f", similarity));
+            statusLabel.setText("<html><div style='text-align: center; color: #EF4444;'><b>❌ Authentication Failed</b><br>Attempts: " + attempts + "</div></html>");
+            progressBar.setString("Failed - " + String.format("%.1f", similarity * 100) + "% match");
+            progressBar.setValue((int)(similarity * 100));
+            progressBar.stopAnimation();
+            statusBadge.setBadgeColor(ModernTheme.ERROR_RED);
+            statusBadge.setText("● Failed");
+            
             int confidencePercent = (int) Math.round(similarity * 100.0);
-            confidenceLabel.setText("Confidence: " + confidencePercent + "% (below threshold)");
+            confidenceLabel.setText("🎯 Confidence: " + confidencePercent + "% (below threshold)");
             
             attemptLogger.logFailure("Low similarity score", similarity);
             
@@ -446,12 +564,18 @@ public class AuthenticationWindow extends JFrame {
             attemptLogger.logIntrusion("Multiple failed authentication attempts", imagePath);
             attemptLogger.logLockout(attempts);
             
-            // Send alert via email (direct, no Firebase)
-            byte[] imageBytes = Files.readAllBytes(Paths.get(imagePath));
-            String details = String.format("Failed attempts: %d, Similarity: %.3f", 
-                attempts, 0.0);
-            String emailTimestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-            EmailAlertService.getInstance().sendIntrusionAlert(imageBytes, emailTimestamp, details);
+            // Send alert via email
+            try {
+                byte[] imageBytes = Files.readAllBytes(Paths.get(imagePath));
+                String details = String.format("INTRUSION DETECTED!\n\nFailed authentication attempts: %d\n" +
+                    "System has been locked for security.\n" +
+                    "Intruder image has been saved and attached to this email.", attempts);
+                String emailTimestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                EmailAlertService.getInstance().sendIntrusionAlert(imageBytes, emailTimestamp, details);
+                logger.info("Intrusion alert email sent successfully");
+            } catch (Exception emailEx) {
+                logger.error("Failed to send intrusion alert email", emailEx);
+            }
             
             // Lock system
             lockManager.lockSystem();
@@ -462,8 +586,11 @@ public class AuthenticationWindow extends JFrame {
             failedAttempts.set(0);
             
             SwingUtilities.invokeLater(() -> {
-                statusLabel.setText("INTRUSION DETECTED! System locked.");
+                statusLabel.setText("<html><div style='text-align: center; color: #EF4444; font-size: 16px;'><b>🚨 INTRUSION DETECTED!</b><br>System locked and alert sent</div></html>");
                 progressBar.setString("LOCKED");
+                progressBar.setValue(0);
+                statusBadge.setBadgeColor(ModernTheme.ERROR_RED);
+                statusBadge.setText("● INTRUSION");
                 JOptionPane.showMessageDialog(this,
                     "INTRUSION DETECTED!\n\n" +
                     "Multiple failed authentication attempts detected.\n" +

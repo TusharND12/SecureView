@@ -108,15 +108,22 @@ public class ImageComparisonService {
             // Method 4: Direct pixel comparison (normalized)
             double pixelScore = pixelWiseCompare(img1, img2);
             
-            // Use weighted average: 40% template, 30% histogram, 20% structural, 10% pixel
-            double combinedScore = (templateScore * 0.4) + (histogramScore * 0.3) + 
-                                   (structuralScore * 0.2) + (pixelScore * 0.1);
+            // Use weighted average: 50% template, 30% histogram, 15% structural, 5% pixel
+            // Increased template weight for better accuracy
+            double combinedScore = (templateScore * 0.5) + (histogramScore * 0.3) + 
+                                   (structuralScore * 0.15) + (pixelScore * 0.05);
             
-            // Additional strictness: require template matching to be at least 0.4
+            // STRICT: require template matching to be at least 0.6 for a valid match
             // This prevents false matches when other methods give high scores
-            // But not too strict to allow legitimate matches
-            if (templateScore < 0.4) {
-                combinedScore = Math.min(combinedScore, templateScore * 0.8); // Penalize if template is low
+            if (templateScore < 0.6) {
+                combinedScore = Math.min(combinedScore, templateScore * 0.7); // Heavy penalty if template is low
+                logger.debug("Template score {} is below 0.6, applying strict penalty", templateScore);
+            }
+            
+            // Additional strictness: if template is very low, heavily penalize
+            if (templateScore < 0.5) {
+                combinedScore = combinedScore * 0.5; // Cut score in half
+                logger.debug("Template score {} is very low, heavily penalizing", templateScore);
             }
             
             // If all scores are very low, use the best single score instead of weighted average

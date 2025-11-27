@@ -1,0 +1,50 @@
+═══════════════════════════════════════════════════════════════
+  SECUREVIEW - QUICK INSTALLATION GUIDE
+═══════════════════════════════════════════════════════════════
+
+Since I can't enter your sudo password, please run these commands
+in your terminal to install and run the project:
+
+STEP 1: Install Java 11 and Maven
+───────────────────────────────────────────────────────────────
+Open a terminal and run:
+
+    sudo apt update
+    sudo apt install -y openjdk-11-jdk maven
+
+STEP 2: Verify Installation
+───────────────────────────────────────────────────────────────
+    java -version
+    mvn -version
+
+STEP 3: Build the Project
+───────────────────────────────────────────────────────────────
+    cd /home/aryan-budukh/Desktop/SecureVIew/SecureView/SecureView/desktop-app
+    mvn clean package
+
+STEP 4: Run the Application
+───────────────────────────────────────────────────────────────
+    java -jar target/secureview-desktop-1.0.0.jar
+
+═══════════════════════════════════════════════════════════════
+  OR USE THE AUTOMATED SCRIPT:
+═══════════════════════════════════════════════════════════════
+
+    cd /home/aryan-budukh/Desktop/SecureVIew/SecureView
+    ./install-and-run.sh
+
+(You'll be prompted for your password when it tries to install Java/Maven)
+
+═══════════════════════════════════════════════════════════════
+  WHAT THIS PROJECT DOES:
+═══════════════════════════════════════════════════════════════
+
+SecureView is a face recognition security system that:
+  • Locks your laptop automatically on boot
+  • Unlocks using face recognition via webcam
+  • Detects unauthorized access attempts
+  • Sends alerts to your phone (if Firebase configured)
+  • Captures photos of intruders
+
+═══════════════════════════════════════════════════════════════
+

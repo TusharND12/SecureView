@@ -3,6 +3,7 @@ package com.secureview.desktop;
 import com.secureview.desktop.config.ConfigManager;
 import com.secureview.desktop.face.FaceRecognitionService;
 import com.secureview.desktop.firebase.FirebaseService;
+import com.secureview.desktop.email.EmailAlertService;
 import com.secureview.desktop.lock.LockManager;
 import com.secureview.desktop.logging.AttemptLogger;
 import com.secureview.desktop.opencv.stub.Mat;
@@ -37,6 +38,8 @@ public class AuthenticationWindow extends JFrame {
     
     private JLabel cameraLabel;
     private JLabel statusLabel;
+    private JLabel userLabel;
+    private JLabel confidenceLabel;
     private JProgressBar progressBar;
     private VideoCapture camera;
     private Timer captureTimer;
@@ -70,25 +73,93 @@ public class AuthenticationWindow extends JFrame {
         setTitle("SecureView - Authentication");
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         setLayout(new BorderLayout());
-        setSize(800, 600);
+        setSize(900, 620);
         setLocationRelativeTo(null);
         setResizable(false);
+        setAlwaysOnTop(true); // Keep window on top initially
+        setVisible(true); // Make sure it's visible
+        toFront(); // Bring to front
+        requestFocus(); // Request focus
         
-        // Camera panel
+        // === HEADER BAR ===
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.setBackground(new Color(0x1f2933));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+        
+        JLabel titleLabel = new JLabel("SecureView");
+        titleLabel.setForeground(Color.WHITE);
+        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        headerPanel.add(titleLabel, BorderLayout.WEST);
+        
+        JLabel modeLabel = new JLabel("Authentication Mode");
+        modeLabel.setForeground(Color.LIGHT_GRAY);
+        modeLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        headerPanel.add(modeLabel, BorderLayout.EAST);
+        
+        add(headerPanel, BorderLayout.NORTH);
+        
+        // === MAIN CONTENT ===
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        // Left: camera panel
+        JPanel cameraPanel = new JPanel(new BorderLayout());
+        cameraPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(0xd1d5db)),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
+        
         cameraLabel = new JLabel("Initializing camera...", JLabel.CENTER);
         cameraLabel.setPreferredSize(new Dimension(640, 480));
-        cameraLabel.setBorder(BorderFactory.createLoweredBevelBorder());
+        cameraPanel.add(cameraLabel, BorderLayout.CENTER);
         
-        // Status panel
+        JLabel cameraCaption = new JLabel("Live camera", JLabel.LEFT);
+        cameraCaption.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        cameraCaption.setForeground(new Color(0x6b7280));
+        cameraPanel.add(cameraCaption, BorderLayout.NORTH);
+        
+        mainPanel.add(cameraPanel, BorderLayout.CENTER);
+        
+        // Right: status & details panel
+        JPanel sidePanel = new JPanel();
+        sidePanel.setLayout(new BoxLayout(sidePanel, BoxLayout.Y_AXIS));
+        sidePanel.setBorder(BorderFactory.createEmptyBorder(0, 15, 0, 0));
+        sidePanel.setPreferredSize(new Dimension(260, 0));
+        
+        // User info
+        JPanel userPanel = new JPanel(new BorderLayout());
+        userPanel.setBorder(BorderFactory.createTitledBorder("User"));
+        userLabel = new JLabel("Current user: user", JLabel.LEFT);
+        userLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        userPanel.add(userLabel, BorderLayout.CENTER);
+        sidePanel.add(userPanel);
+        
+        // Confidence info
+        JPanel confidencePanel = new JPanel(new BorderLayout());
+        confidencePanel.setBorder(BorderFactory.createTitledBorder("Confidence"));
+        confidenceLabel = new JLabel("Confidence: --%", JLabel.LEFT);
+        confidenceLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        confidencePanel.add(confidenceLabel, BorderLayout.CENTER);
+        sidePanel.add(Box.createVerticalStrut(8));
+        sidePanel.add(confidencePanel);
+        
+        // Status text
         JPanel statusPanel = new JPanel(new BorderLayout());
+        statusPanel.setBorder(BorderFactory.createTitledBorder("Status"));
         statusLabel = new JLabel("Position your face in front of the camera", JLabel.CENTER);
-        statusLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        statusLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        statusPanel.add(statusLabel, BorderLayout.CENTER);
         
         progressBar = new JProgressBar();
         progressBar.setStringPainted(true);
         progressBar.setString("Ready");
+        statusPanel.add(progressBar, BorderLayout.SOUTH);
         
-        // Add re-register button
+        sidePanel.add(Box.createVerticalStrut(8));
+        sidePanel.add(statusPanel);
+        
+        // Buttons
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton reRegisterButton = new JButton("Re-register Face");
         reRegisterButton.setToolTipText("Clear existing registration and register a new face");
         reRegisterButton.addActionListener(e -> {
@@ -126,16 +197,28 @@ public class AuthenticationWindow extends JFrame {
                 }
             }
         });
-        
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttonPanel.add(reRegisterButton);
+        sidePanel.add(Box.createVerticalStrut(8));
+        sidePanel.add(buttonPanel);
         
-        statusPanel.add(statusLabel, BorderLayout.CENTER);
-        statusPanel.add(progressBar, BorderLayout.SOUTH);
-        statusPanel.add(buttonPanel, BorderLayout.NORTH);
+        mainPanel.add(sidePanel, BorderLayout.EAST);
         
-        add(cameraLabel, BorderLayout.CENTER);
-        add(statusPanel, BorderLayout.SOUTH);
+        add(mainPanel, BorderLayout.CENTER);
+        
+        // === BOTTOM BAR ===
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel.setBorder(BorderFactory.createEmptyBorder(4, 10, 4, 10));
+        
+        JLabel attemptsLabel = new JLabel("Attempts: 0 failed", JLabel.LEFT);
+        attemptsLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        bottomPanel.add(attemptsLabel, BorderLayout.WEST);
+        
+        JLabel versionLabel = new JLabel("SecureView Desktop", JLabel.RIGHT);
+        versionLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        versionLabel.setForeground(new Color(0x6b7280));
+        bottomPanel.add(versionLabel, BorderLayout.EAST);
+        
+        add(bottomPanel, BorderLayout.SOUTH);
         
         // Handle window close
         addWindowListener(new java.awt.event.WindowAdapter() {
@@ -280,6 +363,13 @@ public class AuthenticationWindow extends JFrame {
                 double similarity = faceRecognitionService.authenticateUser(face);
                 double threshold = configManager.getConfig().getFaceRecognitionThreshold();
                 
+                final double finalSimilarity = similarity;
+                SwingUtilities.invokeLater(() -> {
+                    int confidencePercent = (int) Math.round(finalSimilarity * 100.0);
+                    confidenceLabel.setText("Confidence: " + confidencePercent + "% (Threshold: " +
+                        (int) Math.round(threshold * 100.0) + "%)");
+                });
+                
                 if (similarity >= threshold) {
                     // Authentication successful
                     handleAuthenticationSuccess();
@@ -327,6 +417,8 @@ public class AuthenticationWindow extends JFrame {
             int attempts = failedAttempts.incrementAndGet();
             statusLabel.setText("Authentication failed. Attempts: " + attempts);
             progressBar.setString("Failed - Similarity: " + String.format("%.2f", similarity));
+            int confidencePercent = (int) Math.round(similarity * 100.0);
+            confidenceLabel.setText("Confidence: " + confidencePercent + "% (below threshold)");
             
             attemptLogger.logFailure("Low similarity score", similarity);
             
@@ -354,13 +446,12 @@ public class AuthenticationWindow extends JFrame {
             attemptLogger.logIntrusion("Multiple failed authentication attempts", imagePath);
             attemptLogger.logLockout(attempts);
             
-            // Send alert to mobile device
+            // Send alert via email (direct, no Firebase)
             byte[] imageBytes = Files.readAllBytes(Paths.get(imagePath));
             String details = String.format("Failed attempts: %d, Similarity: %.3f", 
                 attempts, 0.0);
-            firebaseService.sendIntrusionAlert(imageBytes, 
-                LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME), 
-                details);
+            String emailTimestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            EmailAlertService.getInstance().sendIntrusionAlert(imageBytes, emailTimestamp, details);
             
             // Lock system
             lockManager.lockSystem();
@@ -376,7 +467,7 @@ public class AuthenticationWindow extends JFrame {
                 JOptionPane.showMessageDialog(this,
                     "INTRUSION DETECTED!\n\n" +
                     "Multiple failed authentication attempts detected.\n" +
-                    "System has been locked and an alert has been sent to your mobile device.",
+                    "System has been locked and an alert has been sent to your email.",
                     "Security Alert",
                     JOptionPane.ERROR_MESSAGE);
             });

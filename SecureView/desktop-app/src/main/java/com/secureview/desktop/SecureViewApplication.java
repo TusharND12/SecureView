@@ -136,6 +136,8 @@ public class SecureViewApplication {
             configManager
         );
         registrationWindow.setVisible(true);
+        registrationWindow.toFront();
+        registrationWindow.requestFocus();
     }
     
     private void startAuthentication() {
@@ -148,6 +150,8 @@ public class SecureViewApplication {
             configManager
         );
         authWindow.setVisible(true);
+        authWindow.toFront();
+        authWindow.requestFocus();
     }
 }
 

@@ -2,6 +2,9 @@ package com.secureview.desktop;
 
 import com.secureview.desktop.config.ConfigManager;
 import com.secureview.desktop.face.FaceRecognitionService;
+import com.secureview.desktop.face.angle.AngleDetector;
+import com.secureview.desktop.face.quality.FaceQualityAnalyzer;
+import com.secureview.desktop.face.quality.FaceQualityAnalyzer.QualityScore;
 import com.secureview.desktop.firebase.FirebaseService;
 import com.secureview.desktop.lock.LockManager;
 import com.secureview.desktop.logging.AttemptLogger;
@@ -14,6 +17,12 @@ import org.slf4j.LoggerFactory;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -28,6 +37,9 @@ public class RegistrationWindow extends JFrame {
     
     private JLabel cameraLabel;
     private JLabel statusLabel;
+    private JLabel angleProgressLabel;
+    private JProgressBar qualityBar;
+    private JTextField emailField;
     private JButton captureButton;
     private JButton finishButton;
     private VideoCapture camera;
@@ -40,6 +52,10 @@ public class RegistrationWindow extends JFrame {
         "Front", "Right 45°", "Right 90°", "Right 135°", 
         "Back 180°", "Left 135°", "Left 90°", "Left 45°"
     };
+    
+    private final FaceQualityAnalyzer qualityAnalyzer = new FaceQualityAnalyzer();
+    private final AngleDetector angleDetector = new AngleDetector();
+    private static final String EMAIL_CSV_PATH = "T:\\COLLEGE LIFE\\projects\\SecureView\\SecureView\\desktop-app\\Email Alert Data.csv";
     
     public RegistrationWindow(
             FaceRecognitionService faceRecognitionService,
@@ -58,40 +74,113 @@ public class RegistrationWindow extends JFrame {
         setTitle("SecureView - User Registration");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
-        setSize(800, 600);
+        setSize(900, 620);
         setLocationRelativeTo(null);
+        setAlwaysOnTop(true); // Keep window on top initially
+        setVisible(true); // Make sure it's visible
+        toFront(); // Bring to front
+        requestFocus(); // Request focus
         
-        // Camera panel
+        // === HEADER BAR ===
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.setBackground(new Color(0x1f2933));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+        
+        JLabel titleLabel = new JLabel("SecureView");
+        titleLabel.setForeground(Color.WHITE);
+        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        headerPanel.add(titleLabel, BorderLayout.WEST);
+        
+        JLabel modeLabel = new JLabel("360° Face Registration");
+        modeLabel.setForeground(Color.LIGHT_GRAY);
+        modeLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        headerPanel.add(modeLabel, BorderLayout.EAST);
+        
+        add(headerPanel, BorderLayout.NORTH);
+        
+        // === MAIN CONTENT ===
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        // Left: camera with angle chips
+        JPanel cameraPanel = new JPanel(new BorderLayout());
+        cameraPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(0xd1d5db)),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
+        
         cameraLabel = new JLabel("Initializing camera...", JLabel.CENTER);
         cameraLabel.setPreferredSize(new Dimension(640, 480));
-        cameraLabel.setBorder(BorderFactory.createLoweredBevelBorder());
+        cameraPanel.add(cameraLabel, BorderLayout.CENTER);
         
-        // Status panel
+        angleProgressLabel = new JLabel("Angles captured: 0 / " + ANGLES.length);
+        angleProgressLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        cameraPanel.add(angleProgressLabel, BorderLayout.SOUTH);
+        
+        mainPanel.add(cameraPanel, BorderLayout.CENTER);
+        
+        // Right: smart registration panel
+        JPanel sidePanel = new JPanel();
+        sidePanel.setLayout(new BoxLayout(sidePanel, BoxLayout.Y_AXIS));
+        sidePanel.setBorder(BorderFactory.createEmptyBorder(0, 15, 0, 0));
+        sidePanel.setPreferredSize(new Dimension(260, 0));
+
+        // Email input
+        JPanel emailPanel = new JPanel(new BorderLayout());
+        emailPanel.setBorder(BorderFactory.createTitledBorder("Alert email"));
+        emailField = new JTextField();
+        String existingEmail = configManager.getConfig().getAlertEmailTo();
+        if (existingEmail != null && !existingEmail.isEmpty()) {
+            emailField.setText(existingEmail);
+        }
+        emailPanel.add(emailField, BorderLayout.CENTER);
+        JLabel emailHint = new JLabel("<html><small>We will send intrusion alerts to this email.</small></html>");
+        emailPanel.add(emailHint, BorderLayout.SOUTH);
+        sidePanel.add(emailPanel);
+        sidePanel.add(Box.createVerticalStrut(8));
+        
+        // Quality meter
+        JPanel qualityPanel = new JPanel(new BorderLayout());
+        qualityPanel.setBorder(BorderFactory.createTitledBorder("Face quality"));
+        qualityBar = new JProgressBar(0, 100);
+        qualityBar.setStringPainted(true);
+        qualityBar.setString("Waiting for face...");
+        qualityBar.setValue(0);
+        qualityPanel.add(qualityBar, BorderLayout.CENTER);
+        
+        sidePanel.add(qualityPanel);
+        
+        // Status text / feedback
         JPanel statusPanel = new JPanel(new BorderLayout());
-        statusLabel = new JLabel("<html><center><b>360° Face Registration</b><br>" +
-            "We'll capture your face from multiple angles<br>" +
-            "Position your face: <b>Front</b> (0°)<br>" +
-            "Captured: 0/8 angles</center></html>", 
-            JLabel.CENTER);
-        statusLabel.setFont(new Font("Arial", Font.PLAIN, 13));
+        statusPanel.setBorder(BorderFactory.createTitledBorder("Instructions"));
+        statusLabel = new JLabel("<html><center>We'll capture your face from multiple angles.<br>" +
+            "Start by facing the camera: <b>Front (0°)</b> and enter your email above for alerts.</center></html>", JLabel.CENTER);
+        statusLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        statusPanel.add(statusLabel, BorderLayout.CENTER);
         
-        // Button panel
-        JPanel buttonPanel = new JPanel(new FlowLayout());
-        captureButton = new JButton("Capture Current Angle");
+        sidePanel.add(Box.createVerticalStrut(8));
+        sidePanel.add(statusPanel);
+        
+        // Buttons (stacked so both are always visible, even on smaller screens)
+        JPanel buttonPanel = new JPanel();
+        buttonPanel.setLayout(new GridLayout(2, 1, 0, 6));
+        
+        captureButton = new JButton("Capture current angle");
         captureButton.addActionListener(e -> captureFace());
         
-        finishButton = new JButton("Finish Registration");
+        finishButton = new JButton("Finish registration");
         finishButton.setEnabled(false);
         finishButton.addActionListener(e -> finishRegistration());
         
         buttonPanel.add(captureButton);
         buttonPanel.add(finishButton);
         
-        statusPanel.add(statusLabel, BorderLayout.CENTER);
-        statusPanel.add(buttonPanel, BorderLayout.SOUTH);
+        sidePanel.add(Box.createVerticalStrut(8));
+        sidePanel.add(buttonPanel);
         
-        add(cameraLabel, BorderLayout.CENTER);
-        add(statusPanel, BorderLayout.SOUTH);
+        mainPanel.add(sidePanel, BorderLayout.EAST);
+        
+        add(mainPanel, BorderLayout.CENTER);
     }
     
     private void startCamera() {
@@ -188,31 +277,45 @@ public class RegistrationWindow extends JFrame {
             return;
         }
         
-        // Check for face
+        // Check for face and update quality/angle UI
         try {
-                Mat face = faceRecognitionService.detectFace(frame);
-            if (face != null) {
-                // Check if face is empty - use real OpenCV method if available
-                boolean isEmpty = face.empty();
-                if (!isEmpty) {
-                    String angleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : "Angle " + currentAngle;
-                    statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
-                        "Face detected! Position: <b>" + angleName + "</b><br>" +
-                        "Captured: " + capturedFaces.size() + "/8 angles<br>" +
-                        "Click 'Capture Current Angle' when ready</center></html>");
-                    face.release();
+            Mat face = faceRecognitionService.detectFace(frame);
+            if (face != null && !face.empty()) {
+                // Quality analysis
+                QualityScore quality = qualityAnalyzer.analyzeQuality(face);
+                int qualityPercent = (int) Math.round(quality.overallScore * 100.0);
+                qualityBar.setValue(qualityPercent);
+                qualityBar.setString("Quality: " + qualityPercent + "%");
+                
+                // Angle detection
+                AngleDetector.AngleInfo angleInfo = angleDetector.detectAngle(face);
+                String angleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : angleInfo.angleName;
+                
+                statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
+                    "Face detected! Position: <b>" + angleName + "</b><br>" +
+                    quality.feedback + "<br>" +
+                    "Captured: " + capturedFaces.size() + "/" + ANGLES.length + " angles</center></html>");
+                
+                angleProgressLabel.setText("Angles captured: " + capturedFaces.size() + " / " + ANGLES.length);
+                
+                // Optional auto-capture when quality is optimal
+                if (quality.isOptimal && capturedFaces.size() < ANGLES.length && !isProcessing.get()) {
+                    logger.info("Quality optimal ({}). Auto-capturing angle {}.", qualityPercent, capturedFaces.size() + 1);
+                    autoCaptureFromFace(face);
+                    // autoCaptureFromFace will release face
+                    face = null;
                 } else {
-                    statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
-                        "No face detected. Please position your face.<br>" +
-                        "Captured: " + capturedFaces.size() + "/8 angles</center></html>");
-                    if (face != null) {
-                        face.release();
-                    }
+                    face.release();
                 }
             } else {
+                qualityBar.setValue(0);
+                qualityBar.setString("Waiting for face...");
                 statusLabel.setText("<html><center><b>360° Face Registration</b><br>" +
                     "No face detected. Please position your face.<br>" +
-                    "Captured: " + capturedFaces.size() + "/8 angles</center></html>");
+                    "Captured: " + capturedFaces.size() + "/" + ANGLES.length + " angles</center></html>");
+                if (face != null) {
+                    face.release();
+                }
             }
         } catch (Exception e) {
             logger.debug("Face detection error: {}", e.getMessage());
@@ -304,48 +407,7 @@ public class RegistrationWindow extends JFrame {
                     return;
                 }
                 
-                // Store captured face - create a proper copy
-                Mat faceCopy = new Mat();
-                try {
-                    // Use real OpenCV copyTo if available
-                    Object realFace = face.getRealInstance();
-                    Object realCaptured = faceCopy.getRealInstance();
-                    if (realFace != null && realCaptured != null) {
-                        // Use reflection to call copyTo on real Mat
-                        java.lang.reflect.Method copyToMethod = realFace.getClass().getMethod("copyTo", 
-                            Class.forName("org.opencv.core.Mat"));
-                        copyToMethod.invoke(realFace, realCaptured);
-                    } else {
-                        // Fallback to stub copyTo
-                        face.copyTo(faceCopy);
-                    }
-                } catch (Exception e) {
-                    logger.warn("Error copying face Mat, using stub method", e);
-                    face.copyTo(faceCopy);
-                }
-                face.release();
-                
-                // Add to captured faces list
-                capturedFaces.add(faceCopy);
-                currentAngle++;
-                
-                SwingUtilities.invokeLater(() -> {
-                    if (capturedFaces.size() >= ANGLES.length) {
-                        statusLabel.setText("<html><center><b>All angles captured!</b><br>" +
-                            "Captured: " + capturedFaces.size() + "/8 angles<br>" +
-                            "Click 'Finish Registration' to complete</center></html>");
-                        finishButton.setEnabled(true);
-                        captureButton.setEnabled(false);
-                    } else {
-                        String nextAngleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : "Angle " + currentAngle;
-                        statusLabel.setText("<html><center><b>Angle " + (capturedFaces.size()) + " captured!</b><br>" +
-                            "Now position your face: <b>" + nextAngleName + "</b><br>" +
-                            "Captured: " + capturedFaces.size() + "/8 angles<br>" +
-                            "Click 'Capture Current Angle' for next angle</center></html>");
-                        captureButton.setEnabled(true);
-                    }
-                    isProcessing.set(false);
-                });
+                autoCaptureFromFace(face);
                 
             } catch (Exception e) {
                 logger.error("Error capturing face", e);
@@ -358,6 +420,90 @@ public class RegistrationWindow extends JFrame {
         }).start();
     }
     
+    /**
+     * Adds a detected face to the captured list and updates UI.
+     * Used by both manual capture and auto-capture.
+     */
+    private void autoCaptureFromFace(Mat face) {
+        try {
+            // Store captured face - create a proper copy
+            Mat faceCopy = new Mat();
+            try {
+                Object realFace = face.getRealInstance();
+                Object realCaptured = faceCopy.getRealInstance();
+                if (realFace != null && realCaptured != null) {
+                    java.lang.reflect.Method copyToMethod = realFace.getClass().getMethod("copyTo",
+                        Class.forName("org.opencv.core.Mat"));
+                    copyToMethod.invoke(realFace, realCaptured);
+                } else {
+                    face.copyTo(faceCopy);
+                }
+            } catch (Exception e) {
+                logger.warn("Error copying face Mat, using stub method", e);
+                face.copyTo(faceCopy);
+            }
+            face.release();
+            
+            capturedFaces.add(faceCopy);
+            currentAngle++;
+            
+            SwingUtilities.invokeLater(() -> {
+                angleProgressLabel.setText("Angles captured: " + capturedFaces.size() + " / " + ANGLES.length);
+                if (capturedFaces.size() >= ANGLES.length) {
+                    statusLabel.setText("<html><center><b>All angles captured!</b><br>" +
+                        "Captured: " + capturedFaces.size() + "/" + ANGLES.length + " angles<br>" +
+                        "Click 'Finish registration' to complete</center></html>");
+                    finishButton.setEnabled(true);
+                    captureButton.setEnabled(false);
+                } else {
+                    String nextAngleName = currentAngle < ANGLE_NAMES.length ? ANGLE_NAMES[currentAngle] : "Angle " + currentAngle;
+                    statusLabel.setText("<html><center><b>Angle " + (capturedFaces.size()) + " captured!</b><br>" +
+                        "Now position your face: <b>" + nextAngleName + "</b><br>" +
+                        "Captured: " + capturedFaces.size() + "/" + ANGLES.length + " angles<br>" +
+                        "You can wait for auto-capture or click 'Capture current angle'</center></html>");
+                    captureButton.setEnabled(true);
+                }
+                isProcessing.set(false);
+            });
+        } catch (Exception e) {
+            logger.error("Error during auto-capture", e);
+            SwingUtilities.invokeLater(() -> {
+                statusLabel.setText("Auto-capture error: " + e.getMessage());
+                isProcessing.set(false);
+                captureButton.setEnabled(true);
+            });
+        }
+    }
+
+    /**
+     * Saves the user's alert email into a CSV file.
+     */
+    private void saveEmailToCsv(String email) {
+        try {
+            File csvFile = new File(EMAIL_CSV_PATH);
+            boolean exists = csvFile.exists();
+
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(csvFile, true))) {
+                if (!exists) {
+                    writer.write("timestamp,email");
+                    writer.newLine();
+                }
+                String ts = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+                String safeEmail = email.replace(",", " ");
+                writer.write(ts + "," + safeEmail);
+                writer.newLine();
+            }
+            logger.info("Saved alert email to CSV: {}", EMAIL_CSV_PATH);
+        } catch (IOException e) {
+            logger.warn("Failed to save alert email to CSV", e);
+            JOptionPane.showMessageDialog(this,
+                "Warning: Could not save email to CSV file.\n" +
+                "Email alerts may not work after restart.",
+                "Email Save Warning",
+                JOptionPane.WARNING_MESSAGE);
+        }
+    }
+    
     private void finishRegistration() {
         if (capturedFaces.isEmpty()) {
             JOptionPane.showMessageDialog(this,
@@ -366,6 +512,19 @@ public class RegistrationWindow extends JFrame {
                 JOptionPane.WARNING_MESSAGE);
             return;
         }
+
+        // Validate email
+        String email = emailField != null ? emailField.getText().trim() : "";
+        if (email.isEmpty() || !email.contains("@") || !email.contains(".")) {
+            JOptionPane.showMessageDialog(this,
+                "Please enter a valid email address for intrusion alerts.",
+                "Invalid Email",
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        // Save alert email into CSV file
+        saveEmailToCsv(email);
         
         if (capturedFaces.size() < 3) {
             int confirm = JOptionPane.showConfirmDialog(this,

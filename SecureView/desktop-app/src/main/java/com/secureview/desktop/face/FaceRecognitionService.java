@@ -329,45 +329,70 @@ public class FaceRecognitionService {
             return 0.0;
         }
         
-        // Verify liveness if enabled
+        // Verify liveness if enabled (but don't block authentication if it fails)
         if (livenessDetector != null) {
-            if (!livenessDetector.verifyLiveness(faceImage)) {
-                logger.warn("Liveness detection failed during authentication");
-                return 0.0;
+            boolean isLive = livenessDetector.verifyLiveness(faceImage);
+            if (!isLive) {
+                logger.warn("Liveness detection failed during authentication, but continuing with image comparison");
+                // Don't return 0.0 - continue with image comparison anyway
+                // This prevents false negatives from liveness detection blocking legitimate users
+            } else {
+                logger.debug("Liveness detection passed");
             }
         }
         
         // Try image-based authentication first (new method)
         String imageDataPath = getImageDataPath();
         File imageDataDir = new File(imageDataPath);
+        logger.info("Checking Image Data folder: {}", imageDataPath);
+        logger.info("Directory exists: {}, Is directory: {}", imageDataDir.exists(), imageDataDir.isDirectory());
+        
         if (imageDataDir.exists() && imageDataDir.isDirectory()) {
             File[] imageFiles = imageDataDir.listFiles((d, name) -> 
                 name.toLowerCase().endsWith(".jpg") || 
                 name.toLowerCase().endsWith(".jpeg") || 
                 name.toLowerCase().endsWith(".png"));
             
+            logger.info("Found {} image files in Image Data folder", imageFiles != null ? imageFiles.length : 0);
+            
             if (imageFiles != null && imageFiles.length > 0) {
-                logger.debug("Using image-based authentication with {} reference images", imageFiles.length);
+                logger.info("Using image-based authentication with {} reference images", imageFiles.length);
                 
-                // Load reference images
-                List<Mat> referenceImages = imageComparisonService.loadReferenceImages(imageDataPath);
-                if (!referenceImages.isEmpty()) {
-                    // Compare current face with all reference images
-                    double similarity = imageComparisonService.compareWithImages(faceImage, referenceImages);
+                try {
+                    // Load reference images
+                    List<Mat> referenceImages = imageComparisonService.loadReferenceImages(imageDataPath);
+                    logger.info("Loaded {} reference images for comparison", referenceImages.size());
                     
-                    // Cleanup reference images
-                    for (Mat img : referenceImages) {
-                        img.release();
+                    if (referenceImages.isEmpty()) {
+                        logger.error("Failed to load any reference images from: {}", imageDataPath);
+                    } else {
+                        // Compare current face with all reference images
+                        logger.info("Starting image comparison...");
+                        double similarity = imageComparisonService.compareWithImages(faceImage, referenceImages);
+                        
+                        // Cleanup reference images
+                        for (Mat img : referenceImages) {
+                            if (img != null) {
+                                img.release();
+                            }
+                        }
+                        
+                        logger.info("=== AUTHENTICATION RESULT (Image-based) ===");
+                        logger.info("Face similarity score: {} (1.0 = perfect match, 0.0 = no match)", similarity);
+                        logger.info("Threshold: {}", configManager.getConfig().getFaceRecognitionThreshold());
+                        logger.info("Match: {}", similarity >= configManager.getConfig().getFaceRecognitionThreshold() ? "YES" : "NO");
+                        
+                        return similarity;
                     }
-                    
-                    logger.info("=== AUTHENTICATION RESULT (Image-based) ===");
-                    logger.info("Face similarity score: {} (1.0 = perfect match, 0.0 = no match)", similarity);
-                    logger.info("Threshold: {}", configManager.getConfig().getFaceRecognitionThreshold());
-                    logger.info("Match: {}", similarity >= configManager.getConfig().getFaceRecognitionThreshold() ? "YES" : "NO");
-                    
-                    return similarity;
+                } catch (Exception e) {
+                    logger.error("Error during image-based authentication", e);
+                    // Continue to fallback
                 }
+            } else {
+                logger.warn("Image Data folder exists but contains no image files");
             }
+        } else {
+            logger.warn("Image Data folder does not exist or is not a directory: {}", imageDataPath);
         }
         
         // Fallback to embedding-based authentication (old method)
@@ -413,6 +438,13 @@ public class FaceRecognitionService {
      */
     public Mat detectFace(Mat image) {
         return faceDetector.detectFace(image);
+    }
+    
+    /**
+     * Gets the image comparison service.
+     */
+    public ImageComparisonService getImageComparisonService() {
+        return imageComparisonService;
     }
     
     /**

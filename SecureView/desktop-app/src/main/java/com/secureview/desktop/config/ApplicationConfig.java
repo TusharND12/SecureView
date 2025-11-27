@@ -13,6 +13,15 @@ public class ApplicationConfig {
     private String deviceToken;
     private String dataDirectory;
     private String logsDirectory;
+
+    // Email (SMTP) configuration for intrusion alerts
+    private String smtpHost;
+    private int smtpPort;
+    private String smtpUsername;
+    private String smtpPassword;
+    private boolean smtpUseTls;
+    private String alertEmailFrom;
+    private String alertEmailTo;
     
     // Getters and Setters
     public double getFaceRecognitionThreshold() {
@@ -85,6 +94,62 @@ public class ApplicationConfig {
     
     public void setLogsDirectory(String logsDirectory) {
         this.logsDirectory = logsDirectory;
+    }
+
+    public String getSmtpHost() {
+        return smtpHost;
+    }
+
+    public void setSmtpHost(String smtpHost) {
+        this.smtpHost = smtpHost;
+    }
+
+    public int getSmtpPort() {
+        return smtpPort;
+    }
+
+    public void setSmtpPort(int smtpPort) {
+        this.smtpPort = smtpPort;
+    }
+
+    public String getSmtpUsername() {
+        return smtpUsername;
+    }
+
+    public void setSmtpUsername(String smtpUsername) {
+        this.smtpUsername = smtpUsername;
+    }
+
+    public String getSmtpPassword() {
+        return smtpPassword;
+    }
+
+    public void setSmtpPassword(String smtpPassword) {
+        this.smtpPassword = smtpPassword;
+    }
+
+    public boolean isSmtpUseTls() {
+        return smtpUseTls;
+    }
+
+    public void setSmtpUseTls(boolean smtpUseTls) {
+        this.smtpUseTls = smtpUseTls;
+    }
+
+    public String getAlertEmailFrom() {
+        return alertEmailFrom;
+    }
+
+    public void setAlertEmailFrom(String alertEmailFrom) {
+        this.alertEmailFrom = alertEmailFrom;
+    }
+
+    public String getAlertEmailTo() {
+        return alertEmailTo;
+    }
+
+    public void setAlertEmailTo(String alertEmailTo) {
+        this.alertEmailTo = alertEmailTo;
     }
 }
 

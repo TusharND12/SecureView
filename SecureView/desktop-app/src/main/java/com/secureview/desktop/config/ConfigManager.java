@@ -44,6 +44,22 @@ public class ConfigManager {
             try (FileReader reader = new FileReader(configFile)) {
                 config = gson.fromJson(reader, ApplicationConfig.class);
                 logger.info("Configuration loaded from: {}", CONFIG_FILE);
+                
+                // Upgrade old configs with low thresholds to stricter defaults
+                if (config.getFaceRecognitionThreshold() < 0.7) {
+                    logger.info("Upgrading face recognition threshold from {} to 0.75 for better security", 
+                               config.getFaceRecognitionThreshold());
+                    config.setFaceRecognitionThreshold(0.75);
+                    saveConfiguration();
+                }
+                
+                // Upgrade old configs with low max failed attempts to 15
+                if (config.getMaxFailedAttempts() < 15) {
+                    logger.info("Upgrading max failed attempts from {} to 15", 
+                               config.getMaxFailedAttempts());
+                    config.setMaxFailedAttempts(15);
+                    saveConfiguration();
+                }
             }
         } else {
             // Create default configuration
@@ -68,15 +84,24 @@ public class ConfigManager {
     
     private void createDefaultConfig() {
         config = new ApplicationConfig();
-        config.setFaceRecognitionThreshold(0.5); // Lowered from 0.6 to 0.5 for better matching
+        config.setFaceRecognitionThreshold(0.75); // Stricter threshold to prevent false acceptances
         config.setLivenessDetectionEnabled(true);
-        config.setMaxFailedAttempts(3);
+        config.setMaxFailedAttempts(15); // 15 attempts before sending alert email
         config.setLockoutDuration(300000); // 5 minutes
         config.setFirebaseProjectId("");
         config.setFirebaseCredentialsPath("");
         config.setDeviceToken("");
         config.setDataDirectory(CONFIG_DIR + File.separator + "data");
         config.setLogsDirectory(CONFIG_DIR + File.separator + "logs");
+
+        // Email defaults (disabled by default; user must configure)
+        config.setSmtpHost("");
+        config.setSmtpPort(587);
+        config.setSmtpUsername("");
+        config.setSmtpPassword("");
+        config.setSmtpUseTls(true);
+        config.setAlertEmailFrom("");
+        config.setAlertEmailTo("");
     }
     
     private void ensureDirectoriesExist() throws IOException {

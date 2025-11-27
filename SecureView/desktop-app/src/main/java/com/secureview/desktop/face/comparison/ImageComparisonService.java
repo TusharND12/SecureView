@@ -22,55 +22,185 @@ public class ImageComparisonService {
      * @return Best similarity score (0.0 to 1.0)
      */
     public double compareWithImages(Mat currentFace, List<Mat> referenceImages) {
-        if (currentFace == null || currentFace.empty() || referenceImages == null || referenceImages.isEmpty()) {
-            logger.warn("Invalid input for image comparison");
+        if (currentFace == null || currentFace.empty()) {
+            logger.error("Current face image is null or empty");
             return 0.0;
         }
         
-        double bestSimilarity = 0.0;
+        if (referenceImages == null || referenceImages.isEmpty()) {
+            logger.error("Reference images list is null or empty");
+            return 0.0;
+        }
         
-        for (Mat referenceImage : referenceImages) {
+        logger.info("Comparing current face ({}x{}) with {} reference images", 
+                   currentFace.cols(), currentFace.rows(), referenceImages.size());
+        
+        double bestSimilarity = 0.0;
+        double bestTemplateScore = 0.0; // Track best template score separately
+        int validComparisons = 0;
+        
+        for (int i = 0; i < referenceImages.size(); i++) {
+            Mat referenceImage = referenceImages.get(i);
             if (referenceImage == null || referenceImage.empty()) {
+                logger.warn("Reference image {} is null or empty, skipping", i);
+                continue;
+            }
+            
+            if (referenceImage.cols() == 0 || referenceImage.rows() == 0) {
+                logger.warn("Reference image {} has invalid dimensions, skipping", i);
                 continue;
             }
             
             try {
+                logger.debug("Comparing with reference image {} ({}x{})", i, referenceImage.cols(), referenceImage.rows());
+                
+                // Get combined similarity score
                 double similarity = compareTwoImages(currentFace, referenceImage);
+                
+                // Also get template score for strictness validation
+                double templateScore = templateMatch(currentFace, referenceImage);
+                
                 bestSimilarity = Math.max(bestSimilarity, similarity);
-                logger.debug("Image similarity: {}", similarity);
+                bestTemplateScore = Math.max(bestTemplateScore, templateScore);
+                validComparisons++;
+                
+                logger.info("Reference image {} - Similarity: {} (template: {})", i, similarity, templateScore);
             } catch (Exception e) {
-                logger.warn("Error comparing images", e);
+                logger.error("Error comparing with reference image {}", i, e);
             }
         }
         
-        logger.info("Best similarity score from {} reference images: {}", referenceImages.size(), bestSimilarity);
+        if (validComparisons == 0) {
+            logger.error("No valid comparisons were performed!");
+            return 0.0;
+        }
+        
+        // Final strictness check: if template matching is very low, reduce overall score
+        // This prevents false positives when other methods give high scores
+        // But be more lenient to allow legitimate matches
+        if (bestTemplateScore < 0.5) {
+            // Only penalize if template is very low
+            bestSimilarity = Math.min(bestSimilarity, bestTemplateScore * 0.95);
+            logger.debug("Template score low ({}), slightly reducing overall similarity to {}", 
+                        bestTemplateScore, bestSimilarity);
+        }
+        
+        logger.info("Best similarity score from {} valid comparisons: {} (best template: {})", 
+                   validComparisons, bestSimilarity, bestTemplateScore);
         return bestSimilarity;
     }
     
     /**
-     * Compares two face images using multiple methods and returns the best score.
+     * Compares two face images using multiple methods and returns a strict combined score.
+     * Uses weighted average with higher weight on template matching for better accuracy.
      */
     private double compareTwoImages(Mat img1, Mat img2) {
-        // Method 1: Template matching
-        double templateScore = templateMatch(img1, img2);
-        
-        // Method 2: Histogram comparison
-        double histogramScore = histogramCompare(img1, img2);
-        
-        // Method 3: Structural similarity (if available)
-        double structuralScore = structuralSimilarity(img1, img2);
-        
-        // Use the best score
-        double bestScore = Math.max(templateScore, Math.max(histogramScore, structuralScore));
-        
-        logger.debug("Comparison scores - Template: {}, Histogram: {}, Structural: {}, Best: {}", 
-                    templateScore, histogramScore, structuralScore, bestScore);
-        
-        return bestScore;
+        try {
+            // Method 1: Template matching (normalized cross-correlation)
+            double templateScore = templateMatch(img1, img2);
+            
+            // Method 2: Histogram comparison
+            double histogramScore = histogramCompare(img1, img2);
+            
+            // Method 3: Structural similarity
+            double structuralScore = structuralSimilarity(img1, img2);
+            
+            // Method 4: Direct pixel comparison (normalized)
+            double pixelScore = pixelWiseCompare(img1, img2);
+            
+            // Use weighted average: 40% template, 30% histogram, 20% structural, 10% pixel
+            double combinedScore = (templateScore * 0.4) + (histogramScore * 0.3) + 
+                                   (structuralScore * 0.2) + (pixelScore * 0.1);
+            
+            // Additional strictness: require template matching to be at least 0.4
+            // This prevents false matches when other methods give high scores
+            // But not too strict to allow legitimate matches
+            if (templateScore < 0.4) {
+                combinedScore = Math.min(combinedScore, templateScore * 0.8); // Penalize if template is low
+            }
+            
+            // If all scores are very low, use the best single score instead of weighted average
+            // This helps when one method works better than others
+            if (combinedScore < 0.3 && (templateScore > 0.3 || histogramScore > 0.3 || structuralScore > 0.3)) {
+                combinedScore = Math.max(templateScore, Math.max(histogramScore, structuralScore));
+                logger.debug("Using best single score instead of weighted average: {}", combinedScore);
+            }
+            
+            logger.debug("Comparison scores - Template: {:.3f}, Histogram: {:.3f}, Structural: {:.3f}, Pixel: {:.3f}, Combined: {:.3f}", 
+                        templateScore, histogramScore, structuralScore, pixelScore, combinedScore);
+            
+            return Math.max(0.0, Math.min(1.0, combinedScore)); // Clamp to [0, 1]
+        } catch (Exception e) {
+            logger.error("Error in compareTwoImages", e);
+            return 0.0;
+        }
+    }
+    
+    /**
+     * Pixel-wise comparison with normalization.
+     */
+    private double pixelWiseCompare(Mat img1, Mat img2) {
+        try {
+            // Resize to same size
+            Mat resized1 = new Mat();
+            Mat resized2 = new Mat();
+            Size targetSize = new Size(160, 160);
+            
+            Imgproc.resize(img1, resized1, targetSize);
+            Imgproc.resize(img2, resized2, targetSize);
+            
+            // Convert to grayscale
+            Mat gray1 = new Mat();
+            Mat gray2 = new Mat();
+            
+            if (resized1.channels() == 3) {
+                Imgproc.cvtColor(resized1, gray1, Imgproc.COLOR_BGR2GRAY);
+            } else {
+                gray1 = resized1;
+            }
+            
+            if (resized2.channels() == 3) {
+                Imgproc.cvtColor(resized2, gray2, Imgproc.COLOR_BGR2GRAY);
+            } else {
+                gray2 = resized2;
+            }
+            
+            // Convert to float and normalize
+            Mat float1 = new Mat();
+            Mat float2 = new Mat();
+            gray1.convertTo(float1, CvType.CV_32F, 1.0 / 255.0);
+            gray2.convertTo(float2, CvType.CV_32F, 1.0 / 255.0);
+            
+            Core.normalize(float1, float1, 0.0, 1.0, Core.NORM_MINMAX);
+            Core.normalize(float2, float2, 0.0, 1.0, Core.NORM_MINMAX);
+            
+            // Calculate absolute difference
+            Mat diff = new Mat();
+            Core.absdiff(float1, float2, diff);
+            
+            // Calculate mean absolute difference
+            Scalar meanDiff = Core.mean(diff);
+            double similarity = 1.0 - Math.min(meanDiff.val[0], 1.0);
+            
+            // Cleanup
+            resized1.release();
+            resized2.release();
+            gray1.release();
+            gray2.release();
+            float1.release();
+            float2.release();
+            diff.release();
+            
+            return Math.max(0.0, Math.min(1.0, similarity));
+        } catch (Exception e) {
+            logger.warn("Pixel-wise comparison failed", e);
+            return 0.0;
+        }
     }
     
     /**
      * Template matching using OpenCV.
+     * For same-size images, uses normalized cross-correlation directly.
      */
     private double templateMatch(Mat template, Mat image) {
         try {
@@ -98,27 +228,42 @@ public class ImageComparisonService {
                 grayImage = resizedImage;
             }
             
-            // Perform template matching
-            Mat result = new Mat();
-            Imgproc.matchTemplate(grayImage, grayTemplate, result, Imgproc.TM_CCOEFF_NORMED);
+            // For same-size images, use a simpler approach: normalized difference
+            // Convert to float
+            Mat floatTemplate = new Mat();
+            Mat floatImage = new Mat();
+            grayTemplate.convertTo(floatTemplate, CvType.CV_32F, 1.0 / 255.0);
+            grayImage.convertTo(floatImage, CvType.CV_32F, 1.0 / 255.0);
             
-            // Get the best match value
-            double[] minVal = new double[1];
-            double[] maxVal = new double[1];
-            Core.minMaxLoc(result, minVal, maxVal);
+            // Normalize both images to [0, 1]
+            Core.normalize(floatTemplate, floatTemplate, 0.0, 1.0, Core.NORM_MINMAX);
+            Core.normalize(floatImage, floatImage, 0.0, 1.0, Core.NORM_MINMAX);
             
-            double similarity = maxVal[0]; // Normalized correlation coefficient (0-1)
+            // Calculate absolute difference
+            Mat diff = new Mat();
+            Core.absdiff(floatTemplate, floatImage, diff);
+            
+            // Calculate mean absolute difference
+            Scalar meanDiff = Core.mean(diff);
+            
+            // Similarity is inverse of normalized difference
+            // When images are identical, difference is 0, similarity is 1
+            double similarity = 1.0 - Math.min(meanDiff.val[0], 1.0);
+            
+            // Cleanup
+            diff.release();
             
             // Cleanup
             resizedTemplate.release();
             resizedImage.release();
             grayTemplate.release();
             grayImage.release();
-            result.release();
+            floatTemplate.release();
+            floatImage.release();
             
-            return similarity;
+            return Math.max(0.0, Math.min(1.0, similarity));
         } catch (Exception e) {
-            logger.warn("Template matching failed", e);
+            logger.error("Template matching failed", e);
             return 0.0;
         }
     }
@@ -249,7 +394,7 @@ public class ImageComparisonService {
         File dir = new File(directoryPath);
         
         if (!dir.exists() || !dir.isDirectory()) {
-            logger.warn("Reference images directory does not exist: {}", directoryPath);
+            logger.error("Reference images directory does not exist: {}", directoryPath);
             return images;
         }
         
@@ -259,25 +404,35 @@ public class ImageComparisonService {
             name.toLowerCase().endsWith(".png"));
         
         if (imageFiles == null) {
+            logger.error("Failed to list files in directory: {}", directoryPath);
             return images;
         }
         
+        logger.info("Found {} image files to load", imageFiles.length);
+        
         for (File imageFile : imageFiles) {
             try {
+                logger.debug("Attempting to load image: {}", imageFile.getAbsolutePath());
                 Mat image = Imgcodecs.imread(imageFile.getAbsolutePath());
-                if (image != null && !image.empty()) {
+                if (image != null && !image.empty() && image.cols() > 0 && image.rows() > 0) {
                     images.add(image);
-                    logger.debug("Loaded reference image: {}", imageFile.getName());
+                    logger.info("Successfully loaded reference image: {} ({}x{})", 
+                               imageFile.getName(), image.cols(), image.rows());
                 } else {
-                    logger.warn("Failed to load image: {}", imageFile.getName());
+                    logger.error("Failed to load image (null or empty): {}", imageFile.getName());
                 }
             } catch (Exception e) {
-                logger.warn("Error loading image: {}", imageFile.getName(), e);
+                logger.error("Error loading image: {}", imageFile.getName(), e);
             }
         }
         
         logger.info("Loaded {} reference images from {}", images.size(), directoryPath);
+        if (images.isEmpty()) {
+            logger.error("WARNING: No images were successfully loaded from {}", directoryPath);
+        }
         return images;
     }
 }
+
+
 

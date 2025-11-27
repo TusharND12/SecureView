@@ -30,6 +30,7 @@ public class Imgproc {
     private static Method calcHistMethod;
     private static Method matchTemplateMethod;
     private static Method compareHistMethod;
+    private static Method laplacianMethod;
     
     static {
         try {
@@ -62,6 +63,10 @@ public class Imgproc {
                 Class.forName("org.opencv.core.Mat"),
                 int.class);
             compareHistMethod = realClass.getMethod("compareHist",
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"),
+                int.class);
+            laplacianMethod = realClass.getMethod("Laplacian",
                 Class.forName("org.opencv.core.Mat"),
                 Class.forName("org.opencv.core.Mat"),
                 int.class);
@@ -165,5 +170,14 @@ public class Imgproc {
         return 0.0;
     }
     
+    public static void Laplacian(Mat src, Mat dst, int ddepth) {
+        if (laplacianMethod != null && src.getRealInstance() != null && dst.getRealInstance() != null) {
+            try {
+                laplacianMethod.invoke(null, src.getRealInstance(), dst.getRealInstance(), ddepth);
+            } catch (Exception e) {
+                logger.debug("Laplacian failed", e);
+            }
+        }
+    }
 }
 

@@ -22,6 +22,7 @@ android-app/.DS_Store
 **/face_embedding.enc
 **/intrusion_*.jpg
 **/attempts.log
+**/Email Alert Data.csv
 
 # Face image data (sensitive - contains user face images)
 **/Image Data/

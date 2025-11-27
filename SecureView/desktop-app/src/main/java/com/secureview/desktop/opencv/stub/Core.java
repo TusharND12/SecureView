@@ -19,6 +19,9 @@ public class Core {
     private static Method minMaxLocMethod;
     private static Method subtractMethod;
     private static Method meanMethod;
+    private static Method meanStdDevMethod;
+    private static Method flipMethod;
+    private static Method absdiffMethod;
     
     static {
         try {
@@ -46,12 +49,33 @@ public class Core {
                 Class.forName("org.opencv.core.Mat"));
             meanMethod = realCoreClass.getMethod("mean",
                 Class.forName("org.opencv.core.Mat"));
+            meanStdDevMethod = realCoreClass.getMethod("meanStdDev",
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"));
+            flipMethod = realCoreClass.getMethod("flip",
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"),
+                int.class);
+            absdiffMethod = realCoreClass.getMethod("absdiff",
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"),
+                Class.forName("org.opencv.core.Mat"));
         } catch (Exception e) {
             logger.debug("OpenCV Core class not found. Some features will be limited.", e);
         }
     }
     
-    public static void absdiff(Mat src1, Mat src2, Mat dst) {}
+    public static void absdiff(Mat src1, Mat src2, Mat dst) {
+        if (absdiffMethod != null && src1.getRealInstance() != null && 
+            src2.getRealInstance() != null && dst.getRealInstance() != null) {
+            try {
+                absdiffMethod.invoke(null, src1.getRealInstance(), src2.getRealInstance(), dst.getRealInstance());
+            } catch (Exception e) {
+                logger.debug("Failed to calculate absdiff", e);
+            }
+        }
+    }
     
     public static Scalar mean(Mat src) {
         if (meanMethod != null && src.getRealInstance() != null) {
@@ -65,7 +89,27 @@ public class Core {
         return new Scalar();
     }
     
-    public static void meanStdDev(Mat src, Object mean, Object stddev) {}
+    public static void meanStdDev(Mat src, Mat mean, Mat stddev) {
+        if (meanStdDevMethod != null && src.getRealInstance() != null && 
+            mean.getRealInstance() != null && stddev.getRealInstance() != null) {
+            try {
+                meanStdDevMethod.invoke(null, src.getRealInstance(), mean.getRealInstance(), stddev.getRealInstance());
+            } catch (Exception e) {
+                logger.debug("Failed to calculate meanStdDev", e);
+            }
+        }
+    }
+    
+    public static void flip(Mat src, Mat dst, int flipCode) {
+        if (flipMethod != null && src.getRealInstance() != null && dst.getRealInstance() != null) {
+            try {
+                flipMethod.invoke(null, src.getRealInstance(), dst.getRealInstance(), flipCode);
+            } catch (Exception e) {
+                logger.debug("Failed to flip", e);
+            }
+        }
+    }
+    
     public static void magnitude(Mat x, Mat y, Mat magnitude) {}
     
     public static void normalize(Mat src, Mat dst, double alpha, double beta, int normType) {

@@ -103,11 +103,25 @@ public class LivenessDetector {
             gray = faceImage;
         }
         
-        MatOfDouble mean = new MatOfDouble();
-        MatOfDouble stddev = new MatOfDouble();
+        Mat mean = new Mat();
+        Mat stddev = new Mat();
         Core.meanStdDev(gray, mean, stddev);
         
-        double variance = stddev.get(0, 0)[0];
+        // Defensive coding: stub Mat.get(...) may return null if underlying data
+        // is not available yet. In that case, treat variance as low (non-live)
+        // instead of throwing an exception.
+        double variance = 0.0;
+        try {
+            double[] vals = stddev.get(0, 0);
+            if (vals != null && vals.length > 0) {
+                variance = vals[0];
+            } else {
+                logger.debug("LivenessDetector.checkTextureFast: stddev.get(0,0) returned null/empty, treating as low variance");
+            }
+        } catch (Exception e) {
+            logger.debug("LivenessDetector.checkTextureFast: error reading stddev value, treating as low variance", e);
+            variance = 0.0;
+        }
         
         if (gray != faceImage) {
             gray.release();
@@ -135,8 +149,8 @@ public class LivenessDetector {
         Mat lbp = calculateLBP(gray);
         
         // Calculate variance of LBP
-        MatOfDouble mean = new MatOfDouble();
-        MatOfDouble stddev = new MatOfDouble();
+        Mat mean = new Mat();
+        Mat stddev = new Mat();
         Core.meanStdDev(lbp, mean, stddev);
         
         double textureVariance = stddev.get(0, 0)[0];
